@@ -242,6 +242,9 @@ class ReviewPromptBuilder:
             )
         )
 
+        if review_context.truncated:
+            print(f"   ⚠️ Diagnostic: Bounded source context for '{changed_file.file_path}' was truncated. The changed hunks are retained.")
+
         if review_context.used_full_file:
 
             context_mode = "FULL FILE"
@@ -673,7 +676,7 @@ If there are no high-confidence findings:
     def build_batch(
         changed_files: list[ChangedFile],
         repository_context: RepositoryContext,
-        max_code_tokens_per_file: int = 700,
+        max_code_tokens_per_file: int | None = None,
     ) -> str:
         """Build one compact prompt for compatible small files.
 
@@ -684,6 +687,12 @@ If there are no high-confidence findings:
 
         if not changed_files:
             raise ValueError("A review batch must contain at least one file.")
+
+        per_file_budget = (
+            max_code_tokens_per_file
+            if max_code_tokens_per_file is not None
+            else (1200 if len(changed_files) <= 3 else (900 if len(changed_files) <= 5 else 700))
+        )
 
         file_context = repository_context.resolve_file_context(
             changed_files[0].file_path
@@ -709,9 +718,13 @@ If there are no high-confidence findings:
             )
             strategy = ReviewPromptBuilder._detect_strategy(changed_file)
             context = ReviewContextBuilder(
-                max_code_tokens=max_code_tokens_per_file,
+                max_code_tokens=per_file_budget,
                 context_lines_around_change=10,
             ).build(changed_file)
+            
+            if context.truncated:
+                print(f"   ⚠️ Diagnostic: Bounded source context for '{changed_file.file_path}' was truncated to {per_file_budget} tokens. The changed hunks are retained.")
+
             source_context = (
                 ReviewPromptBuilder._number_content(context.content)
                 if context.used_full_file

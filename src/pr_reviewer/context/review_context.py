@@ -8,6 +8,7 @@ class ReviewContext:
     content: str
     used_full_file: bool
     estimated_tokens: int
+    truncated: bool = False
 
 
 class ReviewContextBuilder:
@@ -81,7 +82,7 @@ class ReviewContextBuilder:
             )
         )
 
-        contextual_content = (
+        contextual_content, truncated = (
             self._trim_to_token_budget(
                 contextual_content
             )
@@ -93,6 +94,7 @@ class ReviewContextBuilder:
             estimated_tokens=self.estimate_tokens(
                 contextual_content
             ),
+            truncated=truncated,
         )
 
     @staticmethod
@@ -188,13 +190,13 @@ class ReviewContextBuilder:
     def _trim_to_token_budget(
         self,
         content: str,
-    ) -> str:
+    ) -> tuple[str, bool]:
 
         if (
             self.estimate_tokens(content)
             <= self.max_code_tokens
         ):
-            return content
+            return content, False
 
         max_characters = (
             self.max_code_tokens * 4
@@ -206,5 +208,6 @@ class ReviewContextBuilder:
 
         return (
             trimmed.rstrip()
-            + "\n... context trimmed to fit model budget ..."
+            + "\n... context trimmed to fit model budget ...",
+            True
         )
