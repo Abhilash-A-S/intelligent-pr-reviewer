@@ -38,6 +38,19 @@ class RootCauseMatcher:
             re.compile(r"\bempty\s+catch\b", re.I),
             re.compile(r"\bswallow(?:ed|ing)?\s+(?:an?\s+)?(?:error|exception)\b", re.I),
             re.compile(r"\bsilent(?:ly)?\s+(?:ignore|ignored|ignores)\b", re.I),
+            re.compile(r"\b(?:error|exception)[-\s]?handling\b", re.I),
+            re.compile(r"\b(?:unhandled|caught)\s+exception\b", re.I),
+            re.compile(r"\bpass\b", re.I),
+        ),
+        "jwt-signature-verification-disabled": (
+            re.compile(r"\bjwt\b.*\b(?:verif|signature|decode|token|options)\b", re.I),
+            re.compile(r"\bverify_signature\b", re.I),
+            re.compile(r"\b(?:security|data-validation)\b", re.I),
+            re.compile(r"\binsecure\s+jwt\b", re.I),
+        ),
+        "authorization": (
+            re.compile(r"\b(?:authoriz|permission|access\s+control|role|admin)\b", re.I),
+            re.compile(r"\b(?:privilege|validate.*role|user.*role|api[-\s]?misuse)\b", re.I),
         ),
         "json-parse-without-error-handling": (
             re.compile(r"\bjson\.parse\b", re.I),
@@ -168,13 +181,23 @@ class RootCauseMatcher:
     def __init__(self, registry: RuleRegistry | None = None):
         self.registry = registry or DEFAULT_RULE_REGISTRY
 
-    def same_root_cause(self, ai_finding: Finding, authoritative: Finding) -> bool:
-        if ai_finding.file_path != authoritative.file_path:
-            return False
-
+    def same_root_cause(
+        self,
+        ai_finding: Finding,
+        authoritative: Finding,
+        changed_file_map: dict | None = None,
+    ) -> bool:
         canonical = self.registry.resolve(authoritative.rule_id)
         patterns = self._CONCEPT_PATTERNS.get(canonical)
         if not patterns:
+            return False
+
+        if ai_finding.file_path != authoritative.file_path:
+            ai_text = self._finding_text(ai_finding).lower()
+            enclosing = self._enclosing_function_for(authoritative, changed_file_map)
+            if enclosing and enclosing.lower() in ai_text:
+                if any(pattern.search(ai_text) for pattern in patterns):
+                    return True
             return False
 
         if abs(ai_finding.line_number - authoritative.line_number) > self.DEFAULT_LINE_DISTANCE:
@@ -215,3 +238,21 @@ class RootCauseMatcher:
         text = RootCauseMatcher._finding_text(finding)
         quoted = re.findall(r"[`'\"]([A-Za-z_$][\w$.-]*)[`'\"]", text)
         return quoted[0].lower() if quoted else None
+
+    @classmethod
+    def _enclosing_function_for(
+        cls,
+        finding: Finding,
+        changed_file_map: dict | None = None,
+    ) -> str | None:
+        if not changed_file_map:
+            return None
+        cf = changed_file_map.get(finding.file_path)
+        if not cf or not getattr(cf, "full_content", None):
+            return None
+        lines = cf.full_content.splitlines()
+        for idx in range(min(finding.line_number - 1, len(lines) - 1), -1, -1):
+            m = re.match(r"^\s*(?:async\s+)?def\s+([A-Za-z0-9_]+)", lines[idx])
+            if m:
+                return m.group(1)
+        return None

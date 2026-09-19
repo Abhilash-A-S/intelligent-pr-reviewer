@@ -1,6 +1,6 @@
 import re
 
-from pr_reviewer.review.models import Finding, Severity
+from pr_reviewer.review.models import Finding, Severity, FindingSource
 
 
 class FindingDeduplicator:
@@ -60,11 +60,20 @@ class FindingDeduplicator:
             "unsafe-inner-html", "xss-vulnerability", "dom-xss",
             "unsafe-html", "unsanitized-html",
         },
+        "jwt-verification": {
+            "jwt-signature-verification-disabled", "jwt-verification", "insecure-jwt", "security", "data-validation"
+        },
         "empty-catch": {
             "empty-catch-block", "no-empty-catch", "empty-catch",
-            "swallowed-exception", "bare-except", "bare-exception-handler",
+            "swallowed-exception", "bare-except", "bare-exception-handler", "error-handling", "exception-handling"
+        },
+        "authorization": {
+            "authorization", "missing-endpoint-authorization", "role-check",
+            "access-control", "permission-check", "api-misuse", "security",
         },
     }
+
+    AUTHORITATIVE_SOURCES = {FindingSource.STATIC, FindingSource.FRAMEWORK, FindingSource.COMPILER}
 
     SEMANTIC_LINE_DISTANCE = 2
     SUBJECT_LINE_DISTANCE = 10
@@ -118,10 +127,17 @@ class FindingDeduplicator:
                         continue
                 return index
 
+            line_distance = abs(existing.line_number - candidate.line_number)
+
+            # Reject AI findings overlapping deterministic findings on the same construct
+            candidate_auth = candidate.source in self.AUTHORITATIVE_SOURCES
+            existing_auth = existing.source in self.AUTHORITATIVE_SOURCES
+            if candidate_auth != existing_auth:
+                if line_distance <= 4:
+                    return index
+
             if candidate_family is None or existing_family != candidate_family:
                 continue
-
-            line_distance = abs(existing.line_number - candidate.line_number)
 
             # Subject-sensitive rules can tolerate larger LLM anchor drift only when
             # both findings explicitly identify the same variable/parameter/secret.
@@ -154,7 +170,7 @@ class FindingDeduplicator:
             if line_distance > self.SEMANTIC_LINE_DISTANCE:
                 continue
 
-            if candidate_family in {"loose-equality", "effect-cleanup", "effect-dependency", "json-parse", "timer-reference", "global-listener", "html-injection", "empty-catch"}:
+            if candidate_family in {"loose-equality", "effect-cleanup", "effect-dependency", "json-parse", "timer-reference", "global-listener", "html-injection", "empty-catch", "jwt-verification"}:
                 return index
 
             if same_line:
@@ -246,6 +262,12 @@ class FindingDeduplicator:
 
     @classmethod
     def _is_stronger(cls, candidate: Finding, existing: Finding) -> bool:
+        candidate_auth = candidate.source in cls.AUTHORITATIVE_SOURCES
+        existing_auth = existing.source in cls.AUTHORITATIVE_SOURCES
+        if candidate_auth and not existing_auth:
+            return True
+        if existing_auth and not candidate_auth:
+            return False
         return cls.SEVERITY_ORDER[candidate.severity] > cls.SEVERITY_ORDER[existing.severity]
 
     @staticmethod

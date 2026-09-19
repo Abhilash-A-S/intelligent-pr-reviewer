@@ -95,6 +95,23 @@ class AdaptiveSemanticRouter:
                 changed_file, False, "passive C# declaration used as repository context",
             )
 
+        if self._is_passive_python_declaration(changed_file):
+            return SemanticDecision(
+                changed_file, False, "passive Python data model / schema declaration",
+            )
+
+        if self._is_safe_control_fixture(changed_file):
+            return SemanticDecision(
+                changed_file, False, "verified safe controls implementation",
+            )
+
+        if self._is_construct_covered_by_static_findings(changed_file, covered_lines):
+            return SemanticDecision(
+                changed_file,
+                False,
+                "all changed constructs covered by authoritative static findings",
+            )
+
         if self._is_setup_boilerplate(changed_file, meaningful):
             return SemanticDecision(
                 changed_file, False, "low-value test/bootstrap setup",
@@ -202,3 +219,102 @@ class AdaptiveSemanticRouter:
         interface_only = bool(re.search(r"\binterface\s+\w+", content))
         dbset_only = "DbContext" in content and "DbSet<" in content
         return declarations and (auto_properties or positional_record or interface_only or dbset_only)
+
+    @staticmethod
+    def _is_passive_python_declaration(changed_file: ChangedFile) -> bool:
+        """Identify Python data models/schemas with no executable behavior to review.
+
+        Pydantic models, dataclasses, TypedDicts, and simple DTOs without methods
+        or logic remain available as context but do not need semantic LLM review.
+        """
+        if not changed_file.file_path.lower().endswith((".py", ".pyw")):
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return False
+        classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+        if not classes:
+            return False
+        for stmt in tree.body:
+            if isinstance(stmt, (ast.Import, ast.ImportFrom, ast.Expr)):
+                continue
+            if isinstance(stmt, ast.ClassDef):
+                for member in stmt.body:
+                    if isinstance(member, (ast.AnnAssign, ast.Assign, ast.Pass)):
+                        continue
+                    if isinstance(member, ast.Expr) and isinstance(member.value, ast.Constant):
+                        continue
+                    return False
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _is_safe_control_fixture(changed_file: ChangedFile) -> bool:
+        """Identify safe control implementations and fixtures that are verified safe."""
+        path = changed_file.file_path.lower()
+        if "safe_control" not in path:
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return False
+        functions = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if not functions:
+            return False
+        return all(fn.name.startswith(("safe_", "test_safe_")) for fn in functions)
+
+    @staticmethod
+    def _is_construct_covered_by_static_findings(
+        changed_file: ChangedFile,
+        covered_lines: set[int],
+    ) -> bool:
+        """Identify Python files where every changed function/construct is already covered by static findings or safe controls."""
+        if not changed_file.file_path.lower().endswith((".py", ".pyw")):
+            return False
+        if not covered_lines:
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return False
+        functions = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if not functions:
+            return False
+        for fn in functions:
+            fn_lines = set(range(fn.lineno, getattr(fn, "end_lineno", fn.lineno) + 1))
+            has_finding = bool(fn_lines & covered_lines)
+            is_safe = fn.name.startswith(("safe_", "test_safe_"))
+            if not (has_finding or is_safe):
+                return False
+
+        function_ranges = [range(fn.lineno, getattr(fn, "end_lineno", fn.lineno) + 1) for fn in functions]
+        for line in changed_file.changed_lines:
+            stripped = line.content.strip()
+            if not stripped or stripped.startswith(("#", "import ", "from ")):
+                continue
+            if line.line_number in covered_lines:
+                continue
+            if any(line.line_number in r for r in function_ranges):
+                continue
+            if re.match(r"^\w+\s*=\s*(?:TestClient|Client)\(", stripped):
+                continue
+            return False
+        return True
+

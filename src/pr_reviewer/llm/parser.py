@@ -63,12 +63,14 @@ class LLMResponseParser:
                     "LLM response is not valid JSON."
                 ) from exc
 
+        if isinstance(data, dict) and "findings" in data and isinstance(data["findings"], list):
+            data["findings"] = data["findings"][:3]
+
         try:
             return (
                 ReviewResponse
                 .model_validate(data)
             )
-
         except ValidationError as exc:
             raise ValueError(
                 "LLM response does not match "

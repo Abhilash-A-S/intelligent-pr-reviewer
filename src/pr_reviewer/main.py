@@ -26,9 +26,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--pull-number",
-        required=True,
+        required=False,
+        default=None,
         type=int,
-        help="Pull Request number.",
+        help=(
+            "Pull Request number. "
+            "Required unless --select-pr is used."
+        ),
+    )
+
+    parser.add_argument(
+        "--provider",
+        choices=["github", "azure-devops"],
+        default="github",
+        help=(
+            "Pull request platform provider. "
+            "'github' (default): requires GITHUB_TOKEN in .env. "
+            "'azure-devops': requires AZURE_DEVOPS_PAT and "
+            "--repository as org/project/repo."
+        ),
+    )
+
+    parser.add_argument(
+        "--select-pr",
+        action="store_true",
+        help=(
+            "Interactively list open pull requests for the repository "
+            "and prompt you to select one. Ignores --pull-number when set."
+        ),
     )
 
     mode_group = parser.add_mutually_exclusive_group()
@@ -62,7 +87,60 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help=(
+            "Maximum concurrent LLM review workers. "
+            "Defaults to provider recommended concurrency (e.g. 2 for local Ollama)."
+        ),
+    )
+
     return parser
+
+
+def _select_pull_request(provider, repository: str) -> int:
+    """List open PRs and interactively prompt the user to pick one."""
+    from pr_reviewer.providers.base import PullRequestProvider
+    if not getattr(provider, "supports_pull_request_listing", False):
+        raise ValueError(
+            f"The provider '{type(provider).__name__}' does not support "
+            "pull request listing. Please supply --pull-number directly."
+        )
+    prs = provider.list_pull_requests(repository, state="open")
+    if not prs:
+        raise ValueError(
+            f"No open pull requests found in '{repository}'."
+        )
+    print()
+    print("📋 Open Pull Requests")
+    print("-" * 55)
+    for idx, pr in enumerate(prs, start=1):
+        print(
+            f"  [{idx:2d}] PR #{pr['number']:4d}  {pr['title'][:60]}"
+            f"  ({pr['author']})"
+        )
+    print()
+    while True:
+        raw = input("Select a PR by number or list index: ").strip()
+        if not raw:
+            continue
+        # Accept both direct PR number and list index (e.g. "1", "#2")
+        raw = raw.lstrip("#")
+        try:
+            value = int(raw)
+        except ValueError:
+            print("  Please enter a valid integer.")
+            continue
+        # Treat small values as list indices if they fit
+        if 1 <= value <= len(prs):
+            return prs[value - 1]["number"]
+        # Otherwise treat as an absolute PR number
+        match = next((p for p in prs if p["number"] == value), None)
+        if match:
+            return match["number"]
+        print(f"  PR #{value} not found in the list above. Try again.")
 
 
 def main() -> None:
@@ -80,6 +158,12 @@ def main() -> None:
     publish = args.publish
     dry_run = not publish
 
+    # --------------------------------------------------
+    # Validate: must have either --pull-number or --select-pr
+    # --------------------------------------------------
+    if not args.select_pr and args.pull_number is None:
+        parser.error("--pull-number is required unless --select-pr is used.")
+
     print()
     print("🤖 Intelligent PR Reviewer")
     print("=" * 55)
@@ -88,9 +172,10 @@ def main() -> None:
         f"Repository   : {args.repository}"
     )
 
-    print(
-        f"Pull Request : #{args.pull_number}"
-    )
+    if not args.select_pr:
+        print(
+            f"Pull Request : #{args.pull_number}"
+        )
 
     print(
         f"Mode         : "
@@ -113,7 +198,19 @@ def main() -> None:
         )
 
     try:
-        provider = GitHubProvider()
+        if args.provider == "azure-devops":
+            from pr_reviewer.providers.azure_devops import AzureDevOpsProvider
+            provider = AzureDevOpsProvider()
+        else:
+            provider = GitHubProvider()
+
+        # --------------------------------------------------
+        # Manual PR selection (--select-pr)
+        # --------------------------------------------------
+        pull_number = args.pull_number
+        if getattr(args, "select_pr", False):
+            pull_number = _select_pull_request(provider, args.repository)
+            print(f"Pull Request : #{pull_number}")
 
         llm_provider = OllamaProvider()
 
@@ -121,6 +218,7 @@ def main() -> None:
             provider=provider,
             llm_provider=llm_provider,
             review_depth=args.review_depth,
+            max_llm_workers=args.max_workers,
         )
 
         print()
@@ -128,7 +226,7 @@ def main() -> None:
 
         result = orchestrator.run(
             repository=args.repository,
-            pull_number=args.pull_number,
+            pull_number=pull_number,
             publish=publish,
         )
 

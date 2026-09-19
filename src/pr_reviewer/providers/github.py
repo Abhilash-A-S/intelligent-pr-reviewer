@@ -13,6 +13,38 @@ load_dotenv()
 class GitHubProvider(PullRequestProvider):
     BASE_URL = "https://api.github.com"
     supports_batch_inline_comments = True
+    supports_pull_request_listing = True
+
+    def list_pull_requests(
+        self,
+        repository: str,
+        state: str = "open",
+    ) -> list[dict]:
+        """List pull requests for the repository."""
+        prs: list[dict] = []
+        page = 1
+        while True:
+            response = self.client.get(
+                f"/repos/{repository}/pulls",
+                params={"state": state, "per_page": 30, "page": page},
+            )
+            response.raise_for_status()
+            batch = response.json()
+            if not batch:
+                break
+            for pr in batch:
+                prs.append({
+                    "number": pr["number"],
+                    "title": pr["title"],
+                    "author": pr["user"]["login"],
+                    "base": pr["base"]["ref"],
+                    "head": pr["head"]["ref"],
+                    "state": pr["state"],
+                })
+            if len(batch) < 30:
+                break
+            page += 1
+        return prs
 
     def __init__(self):
         token = os.getenv("GITHUB_TOKEN")

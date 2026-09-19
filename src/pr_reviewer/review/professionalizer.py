@@ -152,10 +152,44 @@ class FindingProfessionalizer:
         if changed_file is None:
             return None
 
-        for line in changed_file.changed_lines:
-            if line.line_number == finding.line_number:
-                code = line.content.strip()
-                if code:
-                    return f"Changed line {finding.line_number}: {code}"
+        lines_by_number = {
+            line.line_number: line
+            for line in changed_file.changed_lines
+        }
 
-        return None
+        primary = lines_by_number.get(finding.line_number)
+        if primary is None:
+            return None
+
+        primary_code = primary.content.strip()
+        if not primary_code:
+            return None
+
+        # For construct-level evidence: include up to 2 additional consecutive
+        # changed lines that continue the same expression (line ends with a
+        # continuation character).
+        CONTINUATION_ENDINGS = ("(", ",", "\\", "->", ":", "=", "+", "-")
+
+        evidence_parts = [f"Changed line {finding.line_number}: {primary_code}"]
+        current_line_num = finding.line_number
+        primary_stripped = primary_code.rstrip()
+
+        for _ in range(2):
+            # Only extend if this line clearly continues on the next.
+            is_continuation = any(
+                primary_stripped.endswith(token)
+                for token in CONTINUATION_ENDINGS
+            )
+            if not is_continuation:
+                break
+            next_line = lines_by_number.get(current_line_num + 1)
+            if next_line is None:
+                break
+            next_code = next_line.content.strip()
+            if not next_code:
+                break
+            evidence_parts.append(f"  line {current_line_num + 1}: {next_code}")
+            current_line_num += 1
+            primary_stripped = next_code.rstrip()
+
+        return "\n".join(evidence_parts)

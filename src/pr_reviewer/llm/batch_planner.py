@@ -15,8 +15,8 @@ class ReviewBatch:
 class ProjectAwareBatchPlanner:
     """Batch only small, compatible files from the same semantic owner."""
 
-    DEFAULT_MAX_FILES = 10
-    DEFAULT_MAX_CHANGED_TOKENS = 9000
+    DEFAULT_MAX_FILES = 5
+    DEFAULT_MAX_CHANGED_TOKENS = 2200
 
     def __init__(
         self,

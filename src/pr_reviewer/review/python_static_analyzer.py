@@ -1,4 +1,5 @@
 import ast
+import re
 from dataclasses import dataclass
 
 from pr_reviewer.review.models import ChangedFile, Finding, Severity
@@ -8,13 +9,6 @@ from pr_reviewer.review.models import ChangedFile, Finding, Severity
 class _Context:
     changed: dict[int, object]
     file_path: str
-
-
-@dataclass(frozen=True)
-class _HttpEnvironment:
-    imports_httpx: bool
-    imports_requests: bool
-    disabled_clients: set[str]
 
 
 class PythonStaticAnalyzer:
@@ -45,19 +39,9 @@ class PythonStaticAnalyzer:
         seen: set[tuple[int, str]] = set()
         source_lines = content.splitlines()
         response_models = self._pydantic_model_fields(tree)
-        http_env = self._collect_http_environment(tree)
 
-        def add(node, severity, rule, message, suggestion, anchor_node=None, evidence=None):
-            anchor = anchor_node if anchor_node is not None else node
-            line_number = getattr(anchor, "lineno", 0)
-            if line_number not in ctx.changed:
-                node_start = getattr(node, "lineno", 0)
-                node_end = getattr(node, "end_lineno", node_start)
-                changed_in_span = [ln for ln in range(node_start, node_end + 1) if ln in ctx.changed]
-                if not changed_in_span:
-                    return
-                line_number = changed_in_span[0]
-
+        def add(node, severity, rule, message, suggestion, evidence=None):
+            line_number = getattr(node, "lineno", 0)
             changed_line = ctx.changed.get(line_number)
             if changed_line is None or (line_number, rule) in seen:
                 return
@@ -88,8 +72,8 @@ class PythonStaticAnalyzer:
                 self._resource_lifecycle(node, add)
                 self._exception_detail_exposure(node, add)
                 self._weak_header_authorization(node, add)
-                self._untrusted_identity_headers(node, add, ctx.changed)
-                self._python_http_contracts(node, add, http_env)
+                self._untrusted_identity_headers(node, add, source_lines)
+                self._python_http_contracts(node, add, content)
                 self._sequential_async_io(node, add)
                 self._failure_reported_as_success(node, add)
                 self._fastapi_upload_contract(node, add)
@@ -142,22 +126,30 @@ class PythonStaticAnalyzer:
                     add(node, Severity.HIGH, "unsafe-code-execution",
                         "Dynamic code execution is performed on a runtime value.",
                         "Replace dynamic execution with an explicit parser or allow-listed operation.")
-                shell_anchor = self._uses_shell_true(node)
-                if shell_anchor is not None:
-                    cmd_line = getattr(node.args[0] if node.args else node, "lineno", None)
-                    shell_line = getattr(shell_anchor, "lineno", None)
-                    
-                    ev_lines = []
-                    if cmd_line and cmd_line in ctx.changed:
-                        ev_lines.append(f"Changed line {cmd_line}: {ctx.changed[cmd_line].content.strip()}")
-                    if shell_line and shell_line != cmd_line and shell_line in ctx.changed:
-                        ev_lines.append(f"Changed line {shell_line}: {ctx.changed[shell_line].content.strip()}")
-                    evidence = "\n".join(ev_lines) if ev_lines else None
-
-                    add(node, Severity.HIGH, "command-injection",
-                        "A command is executed through a shell-enabled API.",
+                if self._uses_shell_true(node):
+                    shell_kw = next((k for k in node.keywords if k.arg == "shell"), None)
+                    anchor_node = shell_kw if shell_kw is not None else node
+                    # Build evidence that shows the call, shell=True, and the
+                    # first argument (the caller-controlled command string).
+                    call_line = source_lines[node.lineno - 1].strip() if node.lineno <= len(source_lines) else ""
+                    end_line = getattr(node, "end_lineno", node.lineno)
+                    if end_line > node.lineno and end_line <= len(source_lines):
+                        call_snippet = " ".join(
+                            source_lines[i].strip()
+                            for i in range(node.lineno - 1, min(end_line, node.lineno + 3))
+                        )
+                    else:
+                        call_snippet = call_line
+                    cmd_evidence = (
+                        f"Line {anchor_node.lineno}: {call_snippet}"
+                        if call_snippet
+                        else None
+                    )
+                    add(anchor_node, Severity.HIGH, "command-injection",
+                        "A command is executed through a shell-enabled API with shell=True; "
+                        "caller-controlled input reaches the shell interpreter.",
                         "Pass a fixed argument list without a shell and validate any external input.",
-                        anchor_node=shell_anchor, evidence=evidence)
+                        evidence=cmd_evidence)
                 if call_name == "print" and not self._logs_sensitive_header(node):
                     add(node, Severity.LOW, "debug-print",
                         "A direct print statement was added to application code.",
@@ -182,12 +174,12 @@ class PythonStaticAnalyzer:
                     add(node, Severity.HIGH, "path-traversal",
                         "A caller-controlled path segment reaches a file-read boundary without containment validation.",
                         "Resolve the candidate path and verify it remains inside the configured root before reading.")
-                jwt_anchor = self._jwt_verification_disabled(node)
-                if jwt_anchor is not None:
-                    add(node, Severity.HIGH, "jwt-signature-verification-disabled",
+                if self._jwt_verification_disabled(node):
+                    opt_kw = next((k for k in node.keywords if k.arg in {"options", "verify"}), None)
+                    anchor_node = opt_kw if opt_kw is not None else node
+                    add(anchor_node, Severity.HIGH, "jwt-signature-verification-disabled",
                         "JWT decoding explicitly disables signature verification.",
-                        "Verify the signature with an allow-listed algorithm and require expiry and subject claims.",
-                        anchor_node=jwt_anchor)
+                        "Verify the signature with an allow-listed algorithm and require expiry and subject claims.")
                 if self._is_mass_assignment(node):
                     add(node, Severity.HIGH, "mass-assignment",
                         "Caller-provided fields are applied wholesale to an existing domain object.",
@@ -648,64 +640,16 @@ class PythonStaticAnalyzer:
         return False
 
     @classmethod
-    def _collect_http_environment(cls, tree: ast.AST) -> _HttpEnvironment:
-        imports_httpx = False
-        imports_requests = False
-        disabled_clients: set[str] = set()
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name == "httpx":
-                        imports_httpx = True
-                    elif alias.name == "requests":
-                        imports_requests = True
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and "httpx" in node.module:
-                    imports_httpx = True
-                elif node.module and "requests" in node.module:
-                    imports_requests = True
-            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-                if isinstance(node.value, ast.Call) and "client" in cls._call_name(node.value.func):
-                    for kw in node.value.keywords:
-                        if kw.arg == "timeout" and (
-                            (isinstance(kw.value, ast.Constant) and (kw.value.value is None or kw.value.value == 0))
-                            or (isinstance(kw.value, ast.Name) and kw.value.id == "None")
-                        ):
-                            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                            for target in targets:
-                                if isinstance(target, ast.Name):
-                                    disabled_clients.add(target.id)
-            elif isinstance(node, (ast.With, ast.AsyncWith)):
-                for item in node.items:
-                    if isinstance(item.context_expr, ast.Call) and "client" in cls._call_name(item.context_expr.func):
-                        for kw in item.context_expr.keywords:
-                            if kw.arg == "timeout" and (
-                                (isinstance(kw.value, ast.Constant) and (kw.value.value is None or kw.value.value == 0))
-                                or (isinstance(kw.value, ast.Name) and kw.value.id == "None")
-                            ):
-                                if isinstance(item.optional_vars, ast.Name):
-                                    disabled_clients.add(item.optional_vars.id)
-
-        return _HttpEnvironment(
-            imports_httpx=imports_httpx,
-            imports_requests=imports_requests,
-            disabled_clients=disabled_clients,
-        )
-
-    @classmethod
-    def _uses_shell_true(cls, node: ast.Call) -> ast.AST | None:
+    def _uses_shell_true(cls, node: ast.Call) -> bool:
         call_name = cls._call_name(node.func)
         if not any(token in call_name for token in ("subprocess", "popen", "check_output", "run", "call")):
-            return None
-        for keyword in node.keywords:
-            if (
-                keyword.arg == "shell"
-                and isinstance(keyword.value, ast.Constant)
-                and keyword.value.value is True
-            ):
-                return keyword
-        return None
+            return False
+        return any(
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in node.keywords
+        )
 
     @staticmethod
     def _pydantic_model_fields(tree: ast.AST) -> dict[str, set[str]]:
@@ -724,7 +668,7 @@ class PythonStaticAnalyzer:
         return models
 
     @classmethod
-    def _untrusted_identity_headers(cls, node, add, changed) -> None:
+    def _untrusted_identity_headers(cls, node, add, source_lines: list[str] | None = None) -> None:
         name = node.name.lower()
         if not any(token in name for token in ("current_user", "identity", "authenticate")):
             return
@@ -735,7 +679,6 @@ class PythonStaticAnalyzer:
             *zip(node.args.kwonlyargs, node.args.kw_defaults),
         ]
         header_arguments = []
-        header_lines = set()
         for argument, default in arguments_with_defaults:
             annotation = argument.annotation
             annotated_header = annotation is not None and any(
@@ -748,42 +691,85 @@ class PythonStaticAnalyzer:
             )
             if annotated_header or default_header:
                 header_arguments.append(argument.arg)
-                if getattr(argument, "lineno", None):
-                    header_lines.add(argument.lineno)
         if not header_arguments:
             return
-        returned_names = set()
-        return_lines = set()
-        for returned in ast.walk(node):
-            if isinstance(returned, ast.Return) and returned.value is not None:
-                has_trusted = False
-                for child in ast.walk(returned.value):
-                    if isinstance(child, ast.Name):
-                        returned_names.add(child.id)
-                        has_trusted = True
-                if has_trusted and getattr(returned, "lineno", None):
-                    return_lines.add(returned.lineno)
-                    
+        returned_names = {
+            child.id
+            for returned in ast.walk(node)
+            if isinstance(returned, ast.Return) and returned.value is not None
+            for child in ast.walk(returned.value)
+            if isinstance(child, ast.Name)
+        }
         trusted = set(header_arguments) & returned_names
         if trusted:
-            ev_lines = []
-            for ln in sorted(header_lines | return_lines):
-                if ln in changed:
-                    ev_lines.append(f"Changed line {ln}: {changed[ln].content.strip()}")
-            evidence = "\n".join(ev_lines) if ev_lines else None
+            trusted_params = ", ".join(sorted(trusted))
+            
+            # Find the actual return statements that leak the header
+            return_lines = []
+            for returned in ast.walk(node):
+                if isinstance(returned, ast.Return) and returned.value is not None:
+                    if any(
+                        isinstance(child, ast.Name) and child.id in trusted
+                        for child in ast.walk(returned.value)
+                    ):
+                        ret_lineno = getattr(returned, "lineno", None)
+                        if source_lines and ret_lineno and 1 <= ret_lineno <= len(source_lines):
+                            return_lines.append(source_lines[ret_lineno - 1].strip())
+                        else:
+                            try:
+                                code = ast.unparse(returned).replace("'", '"')
+                                return_lines.append(code)
+                            except Exception:
+                                pass
+
+            returns_text = "\n".join(return_lines) if return_lines else 'return {"id": x_user_id, "role": x_role}'
+            
+            identity_evidence = (
+                f"def {node.name}(..., {trusted_params}: ... = Header(), ...)\n"
+                f"{returns_text}"
+            )
             add(node, Severity.HIGH, "untrusted-identity-header",
-                "Caller-controlled request headers are returned as authenticated identity or role evidence.",
+                f"Caller-controlled request header(s) '{trusted_params}' are returned as "
+                "authenticated identity or role evidence.",
                 "Derive identity from a verified credential and build authorization context server-side.",
-                evidence=evidence)
+                evidence=identity_evidence)
 
     @classmethod
-    def _python_http_contracts(cls, node, add, http_env: _HttpEnvironment) -> None:
+    def _python_http_contracts(
+        cls,
+        node,
+        add,
+        source_content: str = "",
+    ) -> None:
         # aiohttp ClientSession supplies a finite default timeout and its
         # response lifecycle differs from httpx/requests. Keep that adapter's
         # established lifecycle rules authoritative instead of layering
         # generic HTTP contract claims on top.
         if "clientsession" in ast.dump(node).lower():
             return
+
+        # httpx ships with a finite default timeout (5 s connect + 5 s read).
+        # Emitting missing-timeout when the caller simply relies on that default
+        # is a false positive.  Only report the rule when:
+        #   1. httpx is NOT in use (other clients have no finite default), OR
+        #   2. httpx IS in use AND timeout=None was explicitly set on the client
+        #      (which disables all timeouts and is demonstrably unsafe).
+        node_dump = ast.dump(node)
+        uses_httpx = (
+            "httpx" in node_dump
+            or (source_content and "httpx" in source_content)
+        )
+        httpx_timeout_disabled = bool(
+            source_content
+            and re.search(
+                r"\bhttpx\.(?:AsyncClient|Client)\s*\([^)]*timeout\s*=\s*None",
+                source_content,
+                re.DOTALL,
+            )
+        )
+        # Suppress missing-timeout entirely when httpx has its finite default.
+        suppress_missing_timeout = uses_httpx and not httpx_timeout_disabled
+
         calls: list[tuple[str, ast.Call]] = []
         for child in ast.walk(node):
             if not isinstance(child, (ast.Assign, ast.AnnAssign)):
@@ -799,41 +785,19 @@ class PythonStaticAnalyzer:
             if target:
                 calls.append((target, call))
         for response_name, call in calls:
-            func_name = cls._call_name(call.func)
-            caller_name = func_name.split(".")[0] if "." in func_name else ""
-
             timeout_kw = next((keyword for keyword in call.keywords if keyword.arg == "timeout"), None)
-
-            is_explicit_timeout_none = False
-            if timeout_kw is not None:
-                if (
-                    isinstance(timeout_kw.value, ast.Constant) and (timeout_kw.value.value is None or timeout_kw.value.value == 0)
-                ) or (
-                    isinstance(timeout_kw.value, ast.Name) and timeout_kw.value.id == "None"
-                ):
-                    is_explicit_timeout_none = True
-
-            is_httpx = http_env.imports_httpx or "httpx" in func_name or "asyncclient" in func_name
-            is_requests = http_env.imports_requests or "requests" in func_name
-
-            should_flag_timeout = False
-            timeout_anchor = timeout_kw
-
-            if is_explicit_timeout_none:
-                should_flag_timeout = True
-            elif caller_name in http_env.disabled_clients:
-                should_flag_timeout = True
-            elif is_requests and timeout_kw is None:
-                should_flag_timeout = True
-            elif not is_httpx and timeout_kw is None and not http_env.imports_httpx:
-                should_flag_timeout = True
-
-            if should_flag_timeout:
-                add(call, Severity.MEDIUM, "missing-timeout",
+            timeout_is_none = (
+                timeout_kw is not None
+                and isinstance(timeout_kw.value, ast.Constant)
+                and timeout_kw.value.value is None
+            )
+            has_valid_timeout = timeout_kw is not None and not timeout_is_none
+            suppress = uses_httpx and not httpx_timeout_disabled and not timeout_is_none
+            if not has_valid_timeout and not suppress:
+                anchor = timeout_kw if timeout_is_none else call
+                add(anchor, Severity.MEDIUM, "missing-timeout",
                     "The outbound HTTP request has no explicit timeout boundary.",
-                    "Set an explicit connect/read timeout appropriate for the dependency.",
-                    anchor_node=timeout_anchor)
-
+                    "Set an explicit connect/read timeout appropriate for the dependency.")
             status_checked = any(
                 isinstance(candidate, ast.Call)
                 and cls._call_name(candidate.func) == f"{response_name.lower()}.raise_for_status"
@@ -963,17 +927,16 @@ class PythonStaticAnalyzer:
         return None
 
     @classmethod
-    def _jwt_verification_disabled(cls, node: ast.Call) -> ast.AST | None:
+    def _jwt_verification_disabled(cls, node: ast.Call) -> bool:
         if cls._call_name(node.func).rsplit(".", 1)[-1] != "decode":
-            return None
+            return False
         for keyword in node.keywords:
             if keyword.arg != "options" or not isinstance(keyword.value, ast.Dict):
                 continue
             for key, value in zip(keyword.value.keys, keyword.value.values):
                 if isinstance(key, ast.Constant) and key.value == "verify_signature":
-                    if isinstance(value, ast.Constant) and value.value is False:
-                        return keyword
-        return None
+                    return isinstance(value, ast.Constant) and value.value is False
+        return False
 
     @classmethod
     def _open_redirects(cls, function, add) -> None:

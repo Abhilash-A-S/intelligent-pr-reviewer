@@ -15,6 +15,19 @@ class PullRequestProvider(ABC):
     """
 
     supports_batch_inline_comments = False
+    supports_pull_request_listing = False
+
+    def list_pull_requests(
+        self,
+        repository: str,
+        state: str = "open",
+    ) -> list[dict]:
+        """Return a list of pull requests with id, number, title, and author.
+
+        Providers that support listing should override this method and set
+        ``supports_pull_request_listing = True``.
+        """
+        return []
 
     def publish_inline_comments_batch(
         self,

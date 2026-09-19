@@ -26,10 +26,10 @@ class PythonRuntimeFactValidator:
             return []
 
         content = changed_file.full_content or ""
-        if not re.search(r"\bhttpx\b", content):
+        if not re.search(r"\bhttpx\.(?:AsyncClient|Client)\s*\(", content):
             return []
         if re.search(
-            r"(?:httpx\.(?:AsyncClient|Client)\s*\([^)]*timeout\s*=\s*(?:None|0)|timeout\s*=\s*(?:None|0))",
+            r"\bhttpx\.(?:AsyncClient|Client)\s*\([^)]*timeout\s*=\s*None",
             content,
             flags=re.DOTALL,
         ):

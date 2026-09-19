@@ -251,6 +251,7 @@ class FindingProcessor:
             validation = self.ownership_validator.validate(
                 finding=finding,
                 authoritative_findings=authoritative_findings,
+                changed_file_map=changed_file_map,
             )
 
             if not validation.accepted:

@@ -41,6 +41,7 @@ class FindingOwnershipValidator:
         self,
         finding: Finding,
         authoritative_findings: list[Finding],
+        changed_file_map: dict | None = None,
     ) -> OwnershipValidationResult:
         if finding.source != FindingSource.LLM:
             return OwnershipValidationResult(True)
@@ -59,7 +60,7 @@ class FindingOwnershipValidator:
         # a root cause that deterministic/framework/compiler analysis has already
         # proven. Match by defect semantics + nearby source location, not merely
         # by the LLM's chosen rule ID.
-        if self._duplicates_authoritative_root_cause(finding, authoritative_findings):
+        if self._duplicates_authoritative_root_cause(finding, authoritative_findings, changed_file_map):
             return OwnershipValidationResult(
                 False,
                 [
@@ -82,16 +83,16 @@ class FindingOwnershipValidator:
             ],
         )
 
-
     def _duplicates_authoritative_root_cause(
         self,
         finding: Finding,
         authoritative_findings: list[Finding],
+        changed_file_map: dict | None = None,
     ) -> bool:
         for candidate in authoritative_findings:
             if candidate.source == FindingSource.LLM:
                 continue
-            if self.root_cause_matcher.same_root_cause(finding, candidate):
+            if self.root_cause_matcher.same_root_cause(finding, candidate, changed_file_map):
                 return True
         return False
 

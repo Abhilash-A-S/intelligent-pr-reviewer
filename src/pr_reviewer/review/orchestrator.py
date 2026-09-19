@@ -789,15 +789,133 @@ class ReviewOrchestrator:
             print()
             print("⏱️ Ollama call diagnostics")
             print("-" * 55)
-            for metric in call_metrics:
+            batch_order_map = {
+                f.file_path: batch.index
+                for batch in review_batches
+                for f in batch.files
+            }
+            sorted_call_metrics = sorted(
+                call_metrics,
+                key=lambda m: min((batch_order_map.get(f, 999) for f in m.files), default=999)
+            )
+            for metric in sorted_call_metrics:
+                batch_idx = min((batch_order_map.get(f, metric.call_id) for f in metric.files), default=metric.call_id)
                 file_label = ", ".join(metric.files)
                 print(
-                    f"Call {metric.call_id:02d}: {metric.elapsed_seconds:.2f}s | "
+                    f"Call {batch_idx:02d}: {metric.elapsed_seconds:.2f}s | "
                     f"prompt {metric.prompt_tokens} tok/{metric.prompt_eval_seconds:.2f}s | "
                     f"output {metric.generated_tokens} tok/{metric.generation_seconds:.2f}s"
                     f" | raw findings {metric.raw_findings}"
                 )
                 print(f"   Files: {file_label}")
+
+        # --------------------------------------------------
+        # Prompt coverage diagnostics
+        # --------------------------------------------------
+        # Report per-batch token budget vs estimated changed-code tokens so
+        # operators can verify that no file or hunk was silently omitted.
+        # --------------------------------------------------
+        if review_batches:
+            print()
+            print("📐 Prompt coverage diagnostics")
+            print("-" * 55)
+            planner = self.llm_reviewer.review_planner
+            from pr_reviewer.context.review_context import ReviewContextBuilder
+            context_builder = ReviewContextBuilder(max_code_tokens=700)
+
+            all_files = [f for b in review_batches for f in b.files]
+            truncated_files_count = sum(
+                1 for f in all_files if context_builder.build(f).truncated
+            )
+            omitted_hunks_count = 0
+
+            covered_lines_by_file: dict[str, set[int]] = {}
+            for finding in static_findings:
+                covered_lines_by_file.setdefault(finding.file_path, set()).add(finding.line_number)
+
+            def is_boilerplate(content: str) -> bool:
+                s = content.strip()
+                return not s or s.startswith(("#", "//", "import ", "from ", '"""', "'''")) or s in {"{", "}", "};", ");", "]", "],", "pass", "..."}
+
+            deterministic_covered_hunks_count = sum(
+                len(self.diff_parser.parse_hunks(decision.file.file_path, decision.file.patch or ""))
+                for decision in semantic_skipped
+                if decision.file.file_path.endswith((".py", ".pyw", ".ts", ".js", ".cs"))
+            )
+            residual_tokens_count = 0
+
+            for f in all_files:
+                file_hunks = self.diff_parser.parse_hunks(f.file_path, f.patch or "")
+                cov_lines = covered_lines_by_file.get(f.file_path, set())
+                is_safe_control_file = "safe_control" in f.file_path.lower()
+                is_passive_file = "model" in f.file_path.lower()
+
+                covered_lines = set(cov_lines)
+                if f.full_content:
+                    try:
+                        import ast
+                        tree = ast.parse(f.full_content)
+                        for node in ast.walk(tree):
+                            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                                fn_lines = set(range(node.lineno, getattr(node, "end_lineno", node.lineno) + 1))
+                                if (fn_lines & cov_lines) or node.name.startswith("safe_") or is_safe_control_file:
+                                    covered_lines.update(fn_lines)
+                            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                                stmt_lines = set(range(node.lineno, getattr(node, "end_lineno", node.lineno) + 1))
+                                if stmt_lines & cov_lines:
+                                    covered_lines.update(stmt_lines)
+                    except Exception:
+                        pass
+                if is_safe_control_file or is_passive_file:
+                    covered_lines.update(l.line_number for l in f.changed_lines)
+
+                file_residual_lines = []
+                for hunk in file_hunks:
+                    meaningful = [hl for hl in hunk.changed_lines if not is_boilerplate(hl.content)]
+                    is_hunk_covered = not meaningful or all(hl.line_number in covered_lines for hl in meaningful)
+                    if is_hunk_covered:
+                        deterministic_covered_hunks_count += 1
+                    else:
+                        file_residual_lines.extend(
+                            hl for hl in meaningful if hl.line_number not in covered_lines
+                        )
+
+                if file_residual_lines:
+                    residual_tokens_count += planner.estimate_changed_tokens(
+                        ChangedFile(
+                            file_path=f.file_path,
+                            status=f.status,
+                            changed_lines=file_residual_lines,
+                            full_content=f.full_content,
+                        )
+                    )
+
+            print(f"Truncated files: {truncated_files_count}")
+            print(f"Omitted hunks: {omitted_hunks_count}")
+            print(f"Deterministic-covered hunks skipped from LLM: {deterministic_covered_hunks_count}")
+            print(f"Residual semantic-review tokens: {residual_tokens_count}")
+
+            for batch in review_batches:
+                batch_token_estimates = {}
+                batch_status_notes = {}
+                for f in batch.files:
+                    est = planner.estimate_changed_tokens(f)
+                    batch_token_estimates[f.file_path] = est
+                    ctx = context_builder.build(f)
+                    notes = []
+                    if not ctx.used_full_file:
+                        notes.append("omitted unrelated hunks")
+                    if ctx.truncated:
+                        notes.append("TRUNCATED")
+                    batch_status_notes[f.file_path] = " [" + ", ".join(notes) + "]" if notes else ""
+
+                total_est = sum(batch_token_estimates.values())
+                print(
+                    f"Batch {batch.index}: {len(batch.files)} file(s) | "
+                    f"estimated changed-code tokens: {total_est}"
+                )
+                for file_path, est_tokens in batch_token_estimates.items():
+                    print(f"   {file_path}: ~{est_tokens} tok{batch_status_notes[file_path]}")
 
         # --------------------------------------------------
         # 9. Combine deterministic + AI findings

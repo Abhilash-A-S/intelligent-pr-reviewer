@@ -32,7 +32,19 @@ class UniversalSemanticEvidenceValidator:
     }
 
     def validate(self, finding: Finding, changed_file: ChangedFile) -> SemanticEvidenceResult:
-        if finding.source is not FindingSource.LLM or finding.rule_id not in self.RULES:
+        if finding.source is not FindingSource.LLM:
+            return SemanticEvidenceResult(True)
+
+        full_finding_text = f"{finding.message} {finding.issue or ''} {finding.suggestion or ''}".lower()
+        speculative_phrases = [
+            "assume", "assumes", "assuming", "assumption",
+            "probably", "might be", "could be", "should come from",
+            "appears to be", "seems to", "without knowing", "come from a database",
+        ]
+        if any(phrase in full_finding_text for phrase in speculative_phrases):
+            return SemanticEvidenceResult(False, ["Finding rejected because it is based on speculation or assumption."])
+
+        if finding.rule_id not in self.RULES:
             return SemanticEvidenceResult(True)
 
         line = self._line(changed_file, finding.line_number)

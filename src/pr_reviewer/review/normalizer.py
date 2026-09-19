@@ -308,6 +308,11 @@ class FindingNormalizer:
             ),
             diff_position=finding.diff_position,
             source=finding.source,
+            category=finding.category,
+            issue=finding.issue,
+            impact=finding.impact,
+            evidence=finding.evidence,
+            confidence=finding.confidence,
         )
 
 
