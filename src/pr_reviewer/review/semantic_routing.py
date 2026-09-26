@@ -135,6 +135,11 @@ class AdaptiveSemanticRouter:
                 changed_file, False, "low-value test/bootstrap setup",
             )
 
+        if self._is_java_config_only_file(changed_file, text):
+            return SemanticDecision(
+                changed_file, False, "Java project configuration file with no security-relevant content",
+            )
+
         if strategy is ReviewStrategy.STYLESHEET and not self.STYLE_RISK_PATTERN.search(text):
             return SemanticDecision(
                 changed_file, False, "simple stylesheet without semantic risk signal",
@@ -338,15 +343,14 @@ class AdaptiveSemanticRouter:
 
     @staticmethod
     def _is_passive_java_declaration(changed_file: ChangedFile) -> bool:
-        """Identify Java entity, DTO, and bootstrap classes with no reviewable business logic.
+        """Identify Java entity, DTO, record, enum and bootstrap classes with no reviewable business logic.
 
-        A class is considered passive when its body contains only:
-        - field declarations
-        - getter / setter / constructor / equals / hashCode / toString methods
-        - JPA entity / Spring Bootstrap annotations
-
-        Such classes are available as repository/context signal but don't justify a
-        semantic LLM call in standard or fast mode.
+        Passive types:
+        - @SpringBootApplication bootstrap class
+        - @Entity / @MappedSuperclass / @Embeddable JPA entities
+        - Java record types (record ProductPage(...) {})
+        - Enum types with no methods beyond standard enum members
+        - Pure DTO / value object classes with only accessor methods
         """
         if not changed_file.file_path.lower().endswith(".java"):
             return False
@@ -360,6 +364,14 @@ class AdaptiveSemanticRouter:
         if re.search(r"@SpringBootApplication", content):
             return True
 
+        # Java record types — immutable data carriers, always passive
+        if re.search(r"\brecord\s+\w+\s*\(", content):
+            return True
+
+        # Java interface repository declarations — method contracts without body
+        if re.search(r"\binterface\s+\w+", content) and "default " not in content:
+            return True
+
         # JPA entity classes — persistence mapping only
         is_entity = bool(re.search(r"@(?:Entity|MappedSuperclass|Embeddable)\b", content))
 
@@ -367,8 +379,8 @@ class AdaptiveSemanticRouter:
         body = re.sub(r"//[^\n]*", "", content)
         body = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
 
-        # Extract class body
-        class_match = re.search(r"class\s+\w+[^{]*\{(.*)", body, re.DOTALL)
+        # Extract class or enum body
+        class_match = re.search(r"(?:class|enum|interface)\s+\w+[^{]*\{(.*)", body, re.DOTALL)
         if not class_match:
             return False
         class_body = class_match.group(1)
@@ -388,13 +400,14 @@ class AdaptiveSemanticRouter:
         if is_entity:
             return True
 
-        # Pure DTO / value object: every non-trivial method must be accessor-style
+        # Pure DTO / value object: every declared method must be accessor-style
         non_accessor = re.findall(
             r"(?:public|protected|private)\s+[\w<>\[\],\s]+\s+(\w+)\s*\(",
             class_body,
         )
+        # No methods at all → plain field container, passive
         if not non_accessor:
-            return False
+            return True
         disqualified = [
             name for name in non_accessor
             if not re.match(
@@ -475,3 +488,34 @@ class AdaptiveSemanticRouter:
                 return False
 
         return True
+
+    _JAVA_CONFIG_SECURITY_PATTERN = re.compile(
+        r"(?:password|secret|credential|token|api[_-]?key|access[_-]?key|"
+        r"cors|allowed[_-]?origins|csrf|ssl|tls|"
+        r"datasource\.password|security\.|actuator\.|management\.endpoint)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_java_config_only_file(cls, changed_file: ChangedFile, text: str) -> bool:
+        """Gate Maven and Spring configuration files that have no security-relevant content.
+
+        pom.xml — build descriptor, dependency versions: reviewable only if adding a
+        dependency with a known-risky qualifier (e.g. credentials, tokens, security configuration).
+        application.properties / application.yml — reviewable only when the diff
+        contains security-sensitive keys (credentials, CORS, SSL, actuator endpoints).
+        """
+        path_lower = changed_file.file_path.lower().replace("\\", "/")
+        basename = path_lower.rsplit("/", 1)[-1]
+
+        # Strip standard XML schema URLs (e.g. http://maven.apache.org/POM/4.0.0 https://...)
+        clean_text = re.sub(r"https?://[^\s\"'>]+", "", text)
+
+        if basename == "pom.xml":
+            return not cls._JAVA_CONFIG_SECURITY_PATTERN.search(clean_text)
+
+        if basename in ("application.properties", "application.yml", "application.yaml",
+                        "bootstrap.properties", "bootstrap.yml", "bootstrap.yaml"):
+            return not cls._JAVA_CONFIG_SECURITY_PATTERN.search(clean_text)
+
+        return False

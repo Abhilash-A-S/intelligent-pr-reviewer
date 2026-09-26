@@ -1224,8 +1224,13 @@ class ReviewOrchestrator:
                 and context.project.root == project.root
                 and context.framework not in {"", "unknown", "mixed"}
             }
+            spring_backend_frameworks = {"spring", "spring-boot"}
             displayed_framework = (
-                "mixed"
+                "spring-boot"
+                if len(resolved_frameworks) > 1 and resolved_frameworks <= spring_backend_frameworks and "spring-boot" in resolved_frameworks
+                else "spring"
+                if len(resolved_frameworks) > 1 and resolved_frameworks <= spring_backend_frameworks
+                else "mixed"
                 if len(resolved_frameworks) > 1
                 else next(iter(resolved_frameworks))
                 if resolved_frameworks

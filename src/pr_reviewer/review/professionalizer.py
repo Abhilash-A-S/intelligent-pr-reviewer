@@ -33,7 +33,7 @@ class FindingProfessionalizer:
         "mutable-default-argument": "The same mutable object is reused across calls, so state can leak between otherwise independent requests.",
         "identity-comparison-literal": "Identity is implementation-dependent for ordinary values and can make a valid value compare unexpectedly.",
         "bare-except": "Catching every exception can hide shutdown signals and unrelated failures that the code cannot safely recover from.",
-        "async-blocking-operation": "Blocking the event-loop thread delays unrelated requests and reduces throughput under concurrency.",
+        "async-blocking-operation": "Blocking an async execution thread delays unrelated requests and reduces throughput under concurrency.",
         "incorrect-result-handling": "Callers can receive a successful result even though the requested operation failed.",
         "insufficient-test-assertion": "The test can pass while the response or domain behavior is incorrect, reducing regression protection.",
         "sql-injection": "Attackers may alter the executed query to read or modify data outside the intended operation.",

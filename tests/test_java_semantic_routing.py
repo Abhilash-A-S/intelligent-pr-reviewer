@@ -1,4 +1,4 @@
-﻿"""Tests for Java semantic routing helpers in AdaptiveSemanticRouter."""
+"""Tests for Java semantic routing helpers in AdaptiveSemanticRouter."""
 import pytest
 
 from pr_reviewer.review.models import ChangedFile, ChangedLine
@@ -225,3 +225,29 @@ public class Item {
         cf = java_file(content)
         decision = router.decide(cf, set(), ReviewDepth.DEEP)
         assert decision.eligible
+
+    def test_java_record_is_passive_and_gated(self):
+        content = "public record ProductPage(List<Product> items, int page, int pageSize, long total) {}"
+        cf = java_file(content, path="src/main/java/com/example/model/ProductPage.java")
+        assert router._is_passive_java_declaration(cf)
+        decision = router.decide(cf, set(), ReviewDepth.STANDARD)
+        assert not decision.eligible
+
+    def test_pom_xml_without_credentials_is_gated(self):
+        content = "<project><modelVersion>4.0.0</modelVersion><groupId>com.example</groupId></project>"
+        cf = java_file(content, path="pom.xml")
+        decision = router.decide(cf, set(), ReviewDepth.STANDARD)
+        assert not decision.eligible
+
+    def test_application_properties_without_security_keys_is_gated(self):
+        content = "server.port=8080\nspring.application.name=demo"
+        cf = java_file(content, path="src/main/resources/application.properties")
+        decision = router.decide(cf, set(), ReviewDepth.STANDARD)
+        assert not decision.eligible
+
+    def test_application_properties_with_security_keys_is_eligible(self):
+        content = "spring.datasource.password=secret123\nserver.port=8080"
+        cf = java_file(content, path="src/main/resources/application.properties")
+        decision = router.decide(cf, set(), ReviewDepth.STANDARD)
+        assert decision.eligible
+
