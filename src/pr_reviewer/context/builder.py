@@ -284,8 +284,13 @@ class RepositoryContextBuilder:
             if context.framework not in {"", "unknown"}
         }
         python_backend_frameworks = {"python", "django", "flask", "fastapi"}
+        spring_backend_frameworks = {"spring", "spring-boot"}
         if len(resolved_frameworks) > 1 and resolved_frameworks <= python_backend_frameworks:
             repository_context.framework = "mixed"
+            repository_context.project_type = "backend"
+        elif len(resolved_frameworks) > 1 and resolved_frameworks <= spring_backend_frameworks:
+            # spring + spring-boot in the same repo → promote to spring-boot (more specific)
+            repository_context.framework = "spring-boot" if "spring-boot" in resolved_frameworks else "spring"
             repository_context.project_type = "backend"
         elif len(resolved_frameworks) > 1:
             repository_context.framework = "mixed"

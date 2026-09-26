@@ -840,7 +840,7 @@ class ReviewOrchestrator:
             deterministic_covered_hunks_count = sum(
                 len(self.diff_parser.parse_hunks(decision.file.file_path, decision.file.patch or ""))
                 for decision in semantic_skipped
-                if decision.file.file_path.endswith((".py", ".pyw", ".ts", ".js", ".cs"))
+                if decision.file.file_path.endswith((".py", ".pyw", ".ts", ".js", ".cs", ".java"))
             )
             residual_tokens_count = 0
 

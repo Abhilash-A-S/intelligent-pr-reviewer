@@ -95,6 +95,23 @@ class AdaptiveSemanticRouter:
                 changed_file, False, "passive C# declaration used as repository context",
             )
 
+        if self._is_passive_java_declaration(changed_file):
+            return SemanticDecision(
+                changed_file, False, "passive Java entity/DTO/bootstrap declaration",
+            )
+
+        if self._is_java_safe_control_fixture(changed_file):
+            return SemanticDecision(
+                changed_file, False, "verified safe Java controls implementation",
+            )
+
+        if self._is_java_construct_covered_by_static_findings(changed_file, covered_lines):
+            return SemanticDecision(
+                changed_file,
+                False,
+                "all changed Java constructs covered by authoritative static findings",
+            )
+
         if self._is_passive_python_declaration(changed_file):
             return SemanticDecision(
                 changed_file, False, "passive Python data model / schema declaration",
@@ -111,6 +128,7 @@ class AdaptiveSemanticRouter:
                 False,
                 "all changed constructs covered by authoritative static findings",
             )
+
 
         if self._is_setup_boilerplate(changed_file, meaningful):
             return SemanticDecision(
@@ -318,3 +336,142 @@ class AdaptiveSemanticRouter:
             return False
         return True
 
+    @staticmethod
+    def _is_passive_java_declaration(changed_file: ChangedFile) -> bool:
+        """Identify Java entity, DTO, and bootstrap classes with no reviewable business logic.
+
+        A class is considered passive when its body contains only:
+        - field declarations
+        - getter / setter / constructor / equals / hashCode / toString methods
+        - JPA entity / Spring Bootstrap annotations
+
+        Such classes are available as repository/context signal but don't justify a
+        semantic LLM call in standard or fast mode.
+        """
+        if not changed_file.file_path.lower().endswith(".java"):
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+
+        # Spring bootstrap — nothing to semantically review
+        if re.search(r"@SpringBootApplication", content):
+            return True
+
+        # JPA entity classes — persistence mapping only
+        is_entity = bool(re.search(r"@(?:Entity|MappedSuperclass|Embeddable)\b", content))
+
+        # Remove comments to inspect body cleanly
+        body = re.sub(r"//[^\n]*", "", content)
+        body = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
+
+        # Extract class body
+        class_match = re.search(r"class\s+\w+[^{]*\{(.*)", body, re.DOTALL)
+        if not class_match:
+            return False
+        class_body = class_match.group(1)
+
+        # Disqualifying patterns — actual business logic
+        business_logic = re.compile(
+            r"\b(?:if\s*\(|for\s*\(|while\s*\(|switch\s*\(|try\s*\{|throw\s+new|"
+            r"repository\.|service\.|mapper\.|\.client\.|RestTemplate|WebClient|"
+            r"RestClient|JdbcTemplate|EntityManager|sendRedirect|\.exec\s*\()\b",
+            re.IGNORECASE,
+        )
+
+        if business_logic.search(class_body):
+            return False
+
+        # JPA entity: gate if no disqualifying business logic
+        if is_entity:
+            return True
+
+        # Pure DTO / value object: every non-trivial method must be accessor-style
+        non_accessor = re.findall(
+            r"(?:public|protected|private)\s+[\w<>\[\],\s]+\s+(\w+)\s*\(",
+            class_body,
+        )
+        if not non_accessor:
+            return False
+        disqualified = [
+            name for name in non_accessor
+            if not re.match(
+                r"^(?:get|set|is|has|equals|hashCode|toString|canEqual|build|builder|clone|copy)\w*$",
+                name,
+                re.IGNORECASE,
+            )
+        ]
+        return len(disqualified) == 0
+
+    @staticmethod
+    def _is_java_safe_control_fixture(changed_file: ChangedFile) -> bool:
+        """Identify Java safe-control classes whose class name begins with Safe.
+
+        These files verify that compliant implementations produce no findings.
+        They do not need LLM review.
+        """
+        if not changed_file.file_path.lower().endswith(".java"):
+            return False
+        path_lower = changed_file.file_path.lower().replace("\\", "/")
+        basename = path_lower.rsplit("/", 1)[-1]
+        if not basename.startswith("safe"):
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+        class_name_match = re.search(r"(?:public\s+)?class\s+(\w+)", content)
+        if not class_name_match:
+            return False
+        return class_name_match.group(1).startswith("Safe")
+
+    @classmethod
+    def _is_java_construct_covered_by_static_findings(
+        cls,
+        changed_file: ChangedFile,
+        covered_lines: set[int],
+    ) -> bool:
+        """Identify Java files where every changed method is already hit by a static finding.
+
+        Only gates the file when every method boundary overlaps a known finding.
+        """
+        if not changed_file.file_path.lower().endswith(".java"):
+            return False
+        if not covered_lines:
+            return False
+        content = changed_file.full_content or "\n".join(
+            line.content for line in changed_file.changed_lines
+        )
+        if not content.strip():
+            return False
+
+        lines_list = content.splitlines()
+        method_ranges: list[tuple[int, int]] = []
+        method_sig_re = re.compile(
+            r"(?:public|protected|private|static|final|\s)+"
+            r"[\w<>\[\],\s]+\s+\w+\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{"
+        )
+        for idx, line in enumerate(lines_list, start=1):
+            if not method_sig_re.search(line):
+                continue
+            depth = 0
+            end = idx
+            for j in range(idx - 1, min(len(lines_list), idx + 200)):
+                depth += lines_list[j].count("{") - lines_list[j].count("}")
+                if depth > 0:
+                    end = j + 1
+                if depth <= 0 and j > idx - 1:
+                    break
+            method_ranges.append((idx, end))
+
+        if not method_ranges:
+            return False
+
+        for start, end in method_ranges:
+            if not (set(range(start, end + 1)) & covered_lines):
+                return False
+
+        return True

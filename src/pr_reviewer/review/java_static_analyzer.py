@@ -151,12 +151,12 @@ class JavaStaticAnalyzer:
                 and self._request_parameter_reaches_method(lines, number)
                 and "RestClient.create()" in content
             ):
-                add(number, Severity.HIGH, "security",
+                add(number, Severity.HIGH, "ssrf",
                     "A request-controlled URL reaches an outbound HTTP request.",
                     "Resolve destinations from an allow-list and block private, loopback, and metadata-network addresses.")
 
             if re.search(r"\.sendRedirect\s*\(\s*\w+\s*\)", line) and self._request_parameter_reaches_method(lines, number):
-                add(number, Severity.MEDIUM, "security",
+                add(number, Severity.MEDIUM, "open-redirect",
                     "A request-controlled destination is used directly for an HTTP redirect.",
                     "Allow-list local destinations or map stable identifiers to server-owned URLs.")
 
@@ -176,12 +176,68 @@ class JavaStaticAnalyzer:
                         "Return, retain, join, or attach explicit completion and failure handling to the future.")
 
             if re.search(r"\b(?:log|logger)\w*\.(?:trace|debug|info|warn|error)\s*\([^;]*password", line, re.I):
-                add(number, Severity.HIGH, "security",
+                add(number, Severity.HIGH, "sensitive-data-logging",
                     "A password value is written to application logs.",
                     "Never log credentials; record only non-sensitive identifiers and operation outcomes.")
 
+            # SSRF via RestTemplate — request-controlled URL sent as first argument
+            if re.search(r"\.(?:getForObject|getForEntity|postForObject|postForEntity|exchange)\s*\(\s*\w+", line) \
+                    and self._request_parameter_reaches_method(lines, number):
+                add(number, Severity.HIGH, "ssrf",
+                    "A request-controlled URL reaches an outbound HTTP call via RestTemplate.",
+                    "Resolve destinations from a server-owned allow-list and reject private, loopback, and metadata-network addresses.")
+
+            # SSRF via WebClient — request-controlled URI() argument
+            if (
+                re.search(r"\.uri\s*\(\s*\w+\s*\)", line)
+                and self._request_parameter_reaches_method(lines, number)
+                and re.search(r"\bWebClient\b", content)
+                and "RestClient.create()" not in content  # already handled above
+            ):
+                add(number, Severity.HIGH, "ssrf",
+                    "A request-controlled URL reaches an outbound HTTP call via WebClient.",
+                    "Resolve destinations from a server-owned allow-list and reject private, loopback, and metadata-network addresses.")
+
+            # Missing @Valid on @RequestBody — Spring does not validate without the annotation
+            if re.search(r"@RequestBody\s+\w", line) and not re.search(r"@Valid\s+@RequestBody|@RequestBody\s+@Valid", line):
+                add(number, Severity.MEDIUM, "missing-input-validation",
+                    "A @RequestBody parameter is bound without @Valid; Spring does not apply constraint validation.",
+                    "Add @Valid (or @Validated) before @RequestBody so that JSR-380 constraints are enforced before the handler runs.")
+
+            # Sequential outbound HTTP calls — same method makes two or more blocking calls
+            if re.search(r"\.(exchange|retrieve|getForObject|getForEntity|postForObject|postForEntity)\s*\(", line):
+                method_text = self._method_text(lines, number)
+                outbound_calls = len(re.findall(
+                    r"\.(exchange|retrieve|getForObject|getForEntity|postForObject|postForEntity)\s*\(",
+                    method_text,
+                ))
+                if outbound_calls >= 2:
+                    add(number, Severity.MEDIUM, "sequential-io-operations",
+                        "Multiple outbound HTTP calls are made sequentially in the same method.",
+                        "Parallelise independent requests with CompletableFuture or a reactive chain to reduce latency.")
+
+            # Unsafe multipart upload — no content-type or extension validation before processing
+            if re.search(r"\bMultipartFile\b", line) and not is_test:
+                method_text = self._method_text(lines, number)
+                has_content_type_call = bool(re.search(r"getContentType\s*\(", method_text))
+                has_mime_allowlist = bool(re.search(
+                    r"[\"'](?:image/|application/|text/|video/)[\w/+-]+[\"']",
+                    method_text,
+                ))
+                has_extension_allowlist = bool(re.search(
+                    r"[\"']\.?(?:jpeg|jpg|png|gif|pdf|mp4|svg|webp)[\"']",
+                    method_text,
+                    re.I,
+                ))
+                is_validated = has_content_type_call and (has_mime_allowlist or has_extension_allowlist)
+                if not is_validated:
+                    add(number, Severity.MEDIUM, "upload-security",
+                        "A multipart file is accepted without validating the declared content type or filename extension.",
+                        "Verify the MIME type against a server-side allow-list and enforce a maximum upload size before processing the file.")
+
             if is_test:
                 self._analyze_test_line(lines, number, add)
+
 
         self._ignored_update_success(lines, changed, add)
         self._weak_role_header(lines, changed, add)
