@@ -44,6 +44,18 @@ class UniversalSemanticEvidenceValidator:
         if any(phrase in full_finding_text for phrase in speculative_phrases):
             return SemanticEvidenceResult(False, ["Finding rejected because it is based on speculation or assumption."])
 
+        # Reject speculative configuration findings on dev/local settings without production profile proof
+        file_path_lower = changed_file.file_path.lower().replace("\\", "/")
+        if file_path_lower.endswith((".properties", ".yml", ".yaml", ".env")):
+            config_dev_phrases = ["empty password", "create-drop", "h2", "embedded database", "default password", "debug"]
+            if any(phrase in full_finding_text for phrase in config_dev_phrases):
+                content_lower = (changed_file.full_content or "").lower()
+                if "prod" not in content_lower and "production" not in content_lower:
+                    return SemanticEvidenceResult(
+                        False,
+                        ["Configuration finding rejected: local/dev setting reported without proof of an active production profile."]
+                    )
+
         if finding.rule_id not in self.RULES:
             return SemanticEvidenceResult(True)
 
@@ -102,10 +114,9 @@ class UniversalSemanticEvidenceValidator:
             return assertion and narrow
 
         if rule == "sql-injection":
-            return bool(re.search(r"(?:\b(?:execute|executemany|raw|text)\s*\(|\.query\s*\(|fromsqlraw|executesqlraw)", line, re.I)) and bool(
-                re.search(r"(?:f[\"']|\$\{|\.format\s*\(|%s|\+)", line)
-                or "interpolat" in claim
-            )
+            has_sql_kw = bool(re.search(r"\b(select|insert|update|delete|from|where|createnativequery|createquery|queryforlist|query|execute|executemany|raw|text|fromsqlraw|executesqlraw)\b", line, re.I))
+            has_concat = bool(re.search(r"(?:f[\"']|\$\{|\.format\s*\(|%s|\+)", line) or "interpolat" in claim or "concatenat" in claim)
+            return has_sql_kw and has_concat
 
         if rule == "path-traversal":
             return bool(re.search(r"\b(open|read_text|read_bytes|readalltext|fileinputstream|physicalfile|file\.create|path\.(?:join|resolve))\b", f"{line} {claim}", re.I)) and bool(

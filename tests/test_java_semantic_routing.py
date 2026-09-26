@@ -251,3 +251,40 @@ public class Item {
         decision = router.decide(cf, set(), ReviewDepth.STANDARD)
         assert decision.eligible
 
+    def test_test_class_is_never_passive_declaration(self):
+        content = "@SpringBootTest class UnsafeUserControllerTest {}"
+        cf = java_file(content, path="src/test/java/com/example/UnsafeUserControllerTest.java")
+        assert not router._is_passive_java_declaration(cf)
+
+    def test_safe_user_controller_produces_zero_static_findings(self):
+        from pr_reviewer.review.java_static_analyzer import JavaStaticAnalyzer
+        content = """
+        package com.example;
+        import org.springframework.web.multipart.MultipartFile;
+        public class SafeUserController {
+            public void upload(MultipartFile file) {
+                if ("image/png".equals(file.getContentType())) {
+                    save(file);
+                }
+            }
+        }
+        """
+        cf = java_file(content, path="src/main/java/com/example/SafeUserController.java")
+        findings = JavaStaticAnalyzer().analyze(cf)
+        assert len(findings) == 0
+
+    def test_multipartfile_import_alone_does_not_trigger_upload_security(self):
+        from pr_reviewer.review.java_static_analyzer import JavaStaticAnalyzer
+        content = """
+        package com.example;
+        import org.springframework.web.multipart.MultipartFile;
+        public class UserController {
+            public void status() {}
+        }
+        """
+        cf = java_file(content, path="src/main/java/com/example/UserController.java")
+        findings = JavaStaticAnalyzer().analyze(cf)
+        upload_findings = [f for f in findings if f.rule_id == "upload-security"]
+        assert len(upload_findings) == 0
+
+

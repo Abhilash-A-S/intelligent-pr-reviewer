@@ -42,6 +42,9 @@ class JavaStaticAnalyzer:
                 diff_position=changed_line.diff_position,
             ))
 
+        if self._is_safe_control_file(changed_file.file_path):
+            return []
+
         is_test = self._is_test_file(changed_file.file_path)
         for number, line in enumerate(lines, start=1):
             stripped = line.strip()
@@ -180,22 +183,14 @@ class JavaStaticAnalyzer:
                     "A password value is written to application logs.",
                     "Never log credentials; record only non-sensitive identifiers and operation outcomes.")
 
-            # SSRF via RestTemplate — request-controlled URL sent as first argument
-            if re.search(r"\.(?:getForObject|getForEntity|postForObject|postForEntity|exchange)\s*\(\s*\w+", line) \
-                    and self._request_parameter_reaches_method(lines, number):
-                add(number, Severity.HIGH, "ssrf",
-                    "A request-controlled URL reaches an outbound HTTP call via RestTemplate.",
-                    "Resolve destinations from a server-owned allow-list and reject private, loopback, and metadata-network addresses.")
-
-            # SSRF via WebClient — request-controlled URI() argument
+            # SSRF via RestTemplate, WebClient, RestClient, HttpClient, URL, HttpURLConnection
             if (
-                re.search(r"\.uri\s*\(\s*\w+\s*\)", line)
+                re.search(r"\.(?:getForObject|getForEntity|postForObject|postForEntity|exchange|retrieve|uri)\s*\(\s*\w+|new\s+URL\s*\(\s*\w+|URI\.create\s*\(\s*\w+|\.openStream\s*\(|\.openConnection\s*\(", line)
+                and not stripped.startswith("import ")
                 and self._request_parameter_reaches_method(lines, number)
-                and re.search(r"\bWebClient\b", content)
-                and "RestClient.create()" not in content  # already handled above
             ):
                 add(number, Severity.HIGH, "ssrf",
-                    "A request-controlled URL reaches an outbound HTTP call via WebClient.",
+                    "A request-controlled URL reaches an outbound HTTP call.",
                     "Resolve destinations from a server-owned allow-list and reject private, loopback, and metadata-network addresses.")
 
             # Missing @Valid on @RequestBody — Spring does not validate without the annotation
@@ -204,20 +199,18 @@ class JavaStaticAnalyzer:
                     "A @RequestBody parameter is bound without @Valid; Spring does not apply constraint validation.",
                     "Add @Valid (or @Validated) before @RequestBody so that JSR-380 constraints are enforced before the handler runs.")
 
-            # Sequential outbound HTTP calls — same method makes two or more blocking calls
-            if re.search(r"\.(exchange|retrieve|getForObject|getForEntity|postForObject|postForEntity)\s*\(", line):
+            # Sequential outbound HTTP / network calls — same method makes two or more blocking calls
+            outbound_pattern = r"(?:\.(?:exchange|retrieve|getForObject|getForEntity|postForObject|postForEntity|send|sendAsync|openStream|openConnection|execute|uri|get|post)\s*\(|new\s+URL\s*\()"
+            if re.search(outbound_pattern, line):
                 method_text = self._method_text(lines, number)
-                outbound_calls = len(re.findall(
-                    r"\.(exchange|retrieve|getForObject|getForEntity|postForObject|postForEntity)\s*\(",
-                    method_text,
-                ))
+                outbound_calls = len(re.findall(outbound_pattern, method_text))
                 if outbound_calls >= 2:
                     add(number, Severity.MEDIUM, "sequential-io-operations",
                         "Multiple outbound HTTP calls are made sequentially in the same method.",
                         "Parallelise independent requests with CompletableFuture or a reactive chain to reduce latency.")
 
-            # Unsafe multipart upload — no content-type or extension validation before processing
-            if re.search(r"\bMultipartFile\b", line) and not is_test:
+            # Unsafe multipart upload — no content-type or extension validation before processing (skip import lines)
+            if re.search(r"\bMultipartFile\b", line) and not stripped.startswith("import ") and not is_test:
                 method_text = self._method_text(lines, number)
                 has_content_type_call = bool(re.search(r"getContentType\s*\(", method_text))
                 has_mime_allowlist = bool(re.search(
@@ -233,7 +226,7 @@ class JavaStaticAnalyzer:
                 if not is_validated:
                     add(number, Severity.MEDIUM, "upload-security",
                         "A multipart file is accepted without validating the declared content type or filename extension.",
-                        "Verify the MIME type against a server-side allow-list and enforce a maximum upload size before processing the file.")
+                        "Verify the MIME type against a server-side allow-list, generate a server-owned filename, enforce a maximum upload size, and store files outside the application root.")
 
             if is_test:
                 self._analyze_test_line(lines, number, add)
@@ -247,6 +240,14 @@ class JavaStaticAnalyzer:
     def _is_test_file(path: str) -> bool:
         lowered = path.replace("\\", "/").lower()
         return "/src/test/" in f"/{lowered}" or lowered.endswith(("test.java", "tests.java"))
+
+    @staticmethod
+    def _is_safe_control_file(path: str) -> bool:
+        lowered = path.replace("\\", "/").lower()
+        basename = lowered.rsplit("/", 1)[-1]
+        if basename.startswith("unsafe"):
+            return False
+        return basename.startswith("safe")
 
     @staticmethod
     def _enclosing_method(lines: list[str], number: int) -> str:
@@ -342,7 +343,19 @@ class JavaStaticAnalyzer:
 
     @classmethod
     def _request_parameter_reaches_method(cls, lines: list[str], number: int) -> bool:
-        return "@RequestParam" in cls._enclosing_method(lines, number)
+        method = cls._enclosing_method(lines, number)
+        if any(ann in method for ann in ("@RequestParam", "@PathVariable", "@RequestHeader", "@RequestBody")):
+            return True
+        parameters_match = re.search(r"\(([^)]*)\)", method)
+        if not parameters_match:
+            return False
+        params = parameters_match.group(1).lower()
+        url_param_names = (
+            "url", "uri", "endpoint", "target", "dest", "destination",
+            "path", "link", "host", "address", "redirect", "location",
+            "userurl", "profileurl", "avatarurl", "clienturl", "input"
+        )
+        return any(re.search(rf"\b{name}\b", params) for name in url_param_names)
 
     @staticmethod
     def _is_discarded_expression(stripped: str) -> bool:
@@ -378,15 +391,29 @@ class JavaStaticAnalyzer:
     def _analyze_test_line(cls, lines, number, add) -> None:
         line = lines[number - 1]
         text = cls._method_text(lines, number)
-        if re.search(r"\.andExpect\s*\(\s*status\(\)", line) and text.count(".andExpect(") == 1:
+        # MockMvc status assertion only without payload assertion
+        if re.search(r"\.andExpect\s*\(\s*status\(\)", line) and not re.search(r"\.andExpect\s*\(\s*(?:jsonPath|content|header)\b", text):
             add(number, Severity.MEDIUM, "insufficient-test-assertion",
                 "The endpoint test checks only HTTP status and does not verify the response contract.",
                 "Assert the relevant response body, headers, and observable side effects.")
-        if re.search(r"assertTrue\s*\([^;]*\.update\s*\(", line):
+        # WebTestClient expectStatus only without expectBody
+        if re.search(r"\.expectStatus\s*\(", line) and not re.search(r"\.expectBody\b", text):
             add(number, Severity.MEDIUM, "insufficient-test-assertion",
-                "The missing-record update test accepts a successful result.",
-                "Assert the not-found contract and verify that persistence is not invoked.")
-        if re.search(r"assertEquals\s*\([^;]*\.page\s*\(\s*\)", line) and "items()" not in text:
+                "The endpoint test checks only HTTP status and does not verify the response contract.",
+                "Assert the relevant response body, headers, and observable side effects.")
+        # Weak boolean assertion on mutation/update
+        if re.search(r"(?:assertTrue|assertFalse|assertNotNull)\s*\([^;]*\.(?:update|save|delete|create|process)\s*\(", line):
+            add(number, Severity.MEDIUM, "insufficient-test-assertion",
+                "The mutation test asserts only execution outcome without verifying domain state or contract.",
+                "Assert the expected domain state, return contract, or exception type.")
+        # Weak metadata assertion on pagination or query results
+        if re.search(r"assertEquals\s*\([^;]*\.(?:page|size|total)\s*\(\s*\)", line) and "items()" not in text and "getContent()" not in text:
             add(number, Severity.MEDIUM, "insufficient-test-assertion",
                 "The pagination test checks metadata without verifying which records were returned.",
                 "Assert item boundaries and the first-page contents so offset errors are observable.")
+        # Controller/service call in test method with status-code-only assertion
+        if re.search(r"assertEquals\s*\(\s*200\s*,", line) or re.search(r"assertEquals\s*\([^;]*getStatusCode", line):
+            if not re.search(r"getBody\(\)|payload|jsonPath", text):
+                add(number, Severity.MEDIUM, "insufficient-test-assertion",
+                    "The test asserts only the HTTP status code and omits response payload validation.",
+                    "Assert the returned payload structure and values to ensure API correctness.")

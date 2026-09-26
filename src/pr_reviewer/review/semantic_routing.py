@@ -352,7 +352,8 @@ class AdaptiveSemanticRouter:
         - Enum types with no methods beyond standard enum members
         - Pure DTO / value object classes with only accessor methods
         """
-        if not changed_file.file_path.lower().endswith(".java"):
+        path_lower = changed_file.file_path.lower().replace("\\", "/")
+        if not path_lower.endswith(".java") or "/src/test/" in path_lower or path_lower.endswith(("test.java", "tests.java")):
             return False
         content = changed_file.full_content or "\n".join(
             line.content for line in changed_file.changed_lines
@@ -490,9 +491,9 @@ class AdaptiveSemanticRouter:
         return True
 
     _JAVA_CONFIG_SECURITY_PATTERN = re.compile(
-        r"(?:password|secret|credential|token|api[_-]?key|access[_-]?key|"
+        r"(?:password\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|secret\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|credential|token|api[_-]?key|access[_-]?key|"
         r"cors|allowed[_-]?origins|csrf|ssl|tls|"
-        r"datasource\.password|security\.|actuator\.|management\.endpoint)",
+        r"security\.|actuator\.|management\.endpoint)",
         re.IGNORECASE,
     )
 

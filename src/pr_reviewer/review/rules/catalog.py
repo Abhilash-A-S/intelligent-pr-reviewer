@@ -574,8 +574,26 @@ DEFAULT_RULE_DEFINITIONS = (
     RuleDefinition(
         "unrestricted-file-upload", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
         minimum_severity=Severity.HIGH,
-        aliases=("unsafe-file-upload", "missing-upload-validation"),
+        aliases=("unsafe-file-upload", "missing-upload-validation", "upload-security"),
         capabilities=("api-boundary-analysis", "security-sink-analysis"),
+    ),
+    RuleDefinition(
+        "upload-security", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
+        minimum_severity=Severity.MEDIUM,
+        aliases=("unsafe-file-upload", "missing-upload-validation", "unrestricted-file-upload"),
+        capabilities=("api-boundary-analysis", "security-sink-analysis"),
+    ),
+    RuleDefinition(
+        "missing-input-validation", "reliability", RuleOwner.STATIC, AIPolicy.BLOCK,
+        max_severity=Severity.MEDIUM,
+        aliases=("request-validation-missing", "missing-validation", "unvalidated-request-body"),
+        capabilities=("api-boundary-analysis", "data-validation"),
+    ),
+    RuleDefinition(
+        "sequential-io-operations", "performance", RuleOwner.STATIC, AIPolicy.BLOCK,
+        max_severity=Severity.MEDIUM,
+        aliases=("sequential-network-calls", "blocking-sequential-http", "unparallelized-outbound-calls"),
+        capabilities=("async-analysis", "performance-analysis"),
     ),
     RuleDefinition(
         "ssrf", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
