@@ -320,6 +320,10 @@ class FileClassifier:
         "global.json",
     }
 
+    CONTEXT_ONLY_CONFIGURATION_SUFFIXES = (
+        ".sln",
+    )
+
     CONTEXT_ONLY_CONFIGURATION_PREFIXES = (
         "tsconfig.",
         "vite.config.",
@@ -976,6 +980,12 @@ class FileClassifier:
         file_name: str,
     ) -> bool:
         if file_name in self.CONTEXT_ONLY_CONFIGURATION_FILE_NAMES:
+            return True
+
+        if any(
+            file_name.endswith(suffix)
+            for suffix in self.CONTEXT_ONLY_CONFIGURATION_SUFFIXES
+        ):
             return True
 
         return any(

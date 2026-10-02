@@ -28,6 +28,13 @@ class DotNetStaticAnalyzer:
         changed = {line.line_number: line for line in changed_file.changed_lines}
         findings: list[Finding] = []
         seen: set[tuple[int, str]] = set()
+        seen_methods: set[tuple[int, str]] = set()
+        DEDUP_METHOD_RULES = {
+            "unrestricted-file-upload",
+            "path-traversal",
+            "command-injection",
+            "cors-misconfiguration",
+        }
         path = changed_file.file_path.replace("\\", "/").lower()
         is_test = "/tests/" in f"/{path}" or path.endswith(("test.cs", "tests.cs"))
 
@@ -35,6 +42,12 @@ class DotNetStaticAnalyzer:
             changed_line = changed.get(number)
             if changed_line is None or (number, rule) in seen:
                 return
+            if rule in DEDUP_METHOD_RULES:
+                start = self._method_start(lines, number)
+                method_key = start if start is not None else number
+                if (method_key, rule) in seen_methods:
+                    return
+                seen_methods.add((method_key, rule))
             seen.add((number, rule))
             findings.append(Finding(
                 file_path=changed_file.file_path,
@@ -66,9 +79,7 @@ class DotNetStaticAnalyzer:
                     "An async void method hides completion and exceptions from its caller.",
                     "Return Task so callers can await completion and observe failures.")
 
-            if re.search(r"=>\s*Task\.(?:Run|Factory\.StartNew)\s*\(", line) or re.match(
-                r"^(?:_\s*=\s*)?Task\.(?:Run|Factory\.StartNew)\s*\(", stripped
-            ):
+            if re.search(r"\bTask\.(?:Run|Factory\.StartNew)\s*\(", line):
                 if "_ =" not in stripped or not self._has_task_failure_observer(method):
                     add(number, Severity.MEDIUM, "unowned-background-task",
                         "A background task is started without lifecycle or exception ownership.",
@@ -93,7 +104,8 @@ class DotNetStaticAnalyzer:
                     "Use (page - 1) * pageSize for one-based APIs, or make the API explicitly zero-based.")
 
             if re.search(r"\b(?:key|cacheKey)\s*=.*\bquery\b", line, re.I):
-                if re.search(r"\btenant(?:Id)?\b", signature, re.I) and not re.search(r"tenant", line, re.I):
+                line_body = line.split("{", 1)[-1]
+                if re.search(r"\btenant(?:Id)?\b", signature, re.I) and not re.search(r"tenant", line_body, re.I):
                     add(number, Severity.MEDIUM, "cache-consistency",
                         "Tenant identity is omitted from a tenant-scoped cache key.",
                         "Include the tenant and every result-shaping input in the cache key.")
@@ -105,17 +117,21 @@ class DotNetStaticAnalyzer:
                         "A request-facing asynchronous search operation offers no cancellation contract.",
                         "Accept a CancellationToken and propagate it to database and network calls.")
 
-            if re.search(r"\bcatch\s*\([^)]*\)\s*\{\s*\}", line) or (
-                re.search(r"\bcatch\s*\([^)]*\)\s*\{\s*$", line) and self._block_is_empty(lines, number)
-            ):
+            if re.search(r"\b(?:catch)\b", line) and self._block_is_empty(lines, number):
                 add(number, Severity.MEDIUM, "empty-catch-block",
-                    "A parsing failure is swallowed and execution continues with a valid-looking fallback.",
-                    "Return an explicit failure result or handle and propagate the parsing error.")
+                    "A failure is swallowed in an empty catch block.",
+                    "Return an explicit failure result or handle and propagate the exception.")
 
-            if re.search(r"\bMD5\.Create\s*\(", line) or re.search(r"HashAlgorithmName\.MD5", line):
+            if re.search(r"\b(?:MD5|SHA1)\.(?:Create|HashData|ComputeHash)\b|HashAlgorithmName\.(?:MD5|SHA1)\b", line):
                 add(number, Severity.HIGH, "weak-cryptography",
-                    "MD5 is used for a security-sensitive value.",
+                    "A weak hash algorithm (MD5 or SHA-1) is used for a security-sensitive value.",
                     "Use a cryptographically secure token generator or an appropriate modern KDF.")
+
+            if re.search(r"(?:const|readonly|var|string)\s+(?:[A-Za-z0-9_]*)(?:Secret|SigningKey|PrivateKey|ApiKey|Password|ClientSecret)\s*=\s*\"[^\"]{8,}\"", line, re.I):
+                if not re.search(r"\$\{|%\w+%|__|YOUR_|CHANGE_ME|EXAMPLE", line, re.I):
+                    add(number, Severity.CRITICAL, "hardcoded-secret",
+                        "A cryptographic or signing secret is hardcoded in source code.",
+                        "Load secret values from a protected configuration provider or environment variable.")
 
             if re.search(r"(?:Random\.Shared|new\s+Random\s*\()", line) and re.search(
                 r"token|verification|otp|code|reset", signature, re.I
@@ -151,10 +167,17 @@ class DotNetStaticAnalyzer:
                     "A tenant-scoped repository query ignores the supplied tenant identifier.",
                     "Include the tenant predicate in the database query.")
 
-            if re.search(r"\.(?:FromSqlRaw|ExecuteSqlRawAsync|ExecuteSqlRaw)\s*\([^;]*\+", line):
-                add(number, Severity.HIGH, "sql-injection",
-                    "Raw SQL is constructed by concatenating runtime data.",
-                    "Use interpolated/parameterized EF Core APIs and bind external values.")
+            context_5 = "\n".join(lines[max(0, number - 3):min(len(lines), number + 3)])
+
+            if re.search(r"\.(?:FromSqlRaw|ExecuteSqlRawAsync|ExecuteSqlRaw)\s*\([^;]*\+", context_5) or \
+               re.search(r"\$\"[^\"]*(?:SELECT|INSERT|UPDATE|DELETE)[^\"]*\{", context_5, re.I) or \
+               re.search(r"\"[^\"]*(?:SELECT|INSERT|UPDATE|DELETE)[^\"]*\"\s*\+", context_5, re.I) or \
+               (re.search(r"\b(?:ExecuteAsync|QueryAsync|Execute|Query)\s*\(\s*(?:\$\"[^\"]*|(?:\"[^\"]*\")?\s*\+)", context_5) and re.search(r"SELECT|INSERT|UPDATE|DELETE", context_5, re.I)):
+                if not re.search(r"FromSqlInterpolated|FromSql\b|AddWithValue|@\w+", line):
+                    if re.search(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b|FromSqlRaw|ExecuteSqlRaw", line, re.I) or re.search(r"\bvar\s+sql\s*=\s*\$\"[^\"]*(?:SELECT|INSERT|UPDATE|DELETE)", line, re.I):
+                        add(number, Severity.HIGH, "sql-injection",
+                            "Raw SQL is constructed by concatenating or interpolating runtime data.",
+                            "Use interpolated/parameterized queries and bind external values.")
 
             if re.search(r"=>\s*db\.\w+\.ToListAsync\s*\(", line) and self._read_method(signature):
                 if ".AsNoTracking(" not in line:
@@ -167,11 +190,14 @@ class DotNetStaticAnalyzer:
                     "A database query is executed once for every item in the loop.",
                     "Project or aggregate the related values in one database query.")
 
-            nullable_assignment = re.search(r"var\s+(\w+)\s*=\s*await\s+[^;]*FirstOrDefaultAsync", line)
-            if nullable_assignment and self._dereferenced_later(method, nullable_assignment.group(1)):
-                add(number, Severity.MEDIUM, "null-safety",
-                    "A nullable FirstOrDefaultAsync result is later dereferenced without a check.",
-                    "Handle the not-found case before accessing the entity.")
+            nullable_assignment = re.search(r"var\s+(\w+)\s*=\s*(?:await\s+)?[^;]*\b(?:FirstOrDefaultAsync|FirstOrDefault|SingleOrDefaultAsync|SingleOrDefault|LastOrDefaultAsync|LastOrDefault|FindAsync|Find)\b", method)
+            if nullable_assignment:
+                var_name = nullable_assignment.group(1)
+                if re.search(rf"\b{re.escape(var_name)}\.[A-Za-z_]", line):
+                    if not re.search(rf"\b{re.escape(var_name)}\s*(?:==|!=|is)\s*null|\?\.", method):
+                        add(number, Severity.MEDIUM, "null-safety",
+                            f"The nullable result '{var_name}' is dereferenced without a null check.",
+                            "Handle the not-found case before accessing the entity.")
 
             if re.search(r"\.AddAsync\s*\(", line) and "SaveChanges" not in method:
                 add(number, Severity.MEDIUM, "missing-save-changes",
@@ -193,10 +219,19 @@ class DotNetStaticAnalyzer:
                     "Mutable request or tenant state is registered as a singleton.",
                     "Use scoped state or pass tenant identity explicitly through request-owned services.")
 
-            if "SetIsOriginAllowed(_ => true)" in line and "AllowCredentials()" in line:
-                add(number, Severity.HIGH, "cors-misconfiguration",
-                    "Credentialed CORS accepts every requesting origin.",
-                    "Allow-list trusted origins when credentials are enabled.")
+            if ("SetIsOriginAllowed(_ => true)" in line or "AllowAnyOrigin()" in line or "SetIsOriginAllowed" in context_5) and ("AllowCredentials()" in line or "AllowCredentials" in context_5):
+                if "SetIsOriginAllowed" in line or "AllowAnyOrigin" in line or ("AllowCredentials" in line and "SetIsOriginAllowed" not in context_5 and "AllowAnyOrigin" not in context_5):
+                    add(number, Severity.HIGH, "cors-misconfiguration",
+                        "Credentialed CORS accepts every requesting origin.",
+                        "Allow-list trusted origins when credentials are enabled.")
+
+            if re.search(r"Response\.Cookies\.Append\s*\(", line) or re.search(r"Response\.Cookies\.Append\s*\(", context_5):
+                if not (re.search(r"HttpOnly\s*=\s*true", method, re.I) and re.search(r"Secure\s*=\s*true", method, re.I)):
+                    if "CookieOptions" not in line or not (re.search(r"HttpOnly\s*=\s*true", line, re.I) and re.search(r"Secure\s*=\s*true", line, re.I)):
+                        if "Append" in line:
+                            add(number, Severity.HIGH, "insecure-cookie",
+                                "A cookie is appended without HttpOnly or Secure protection.",
+                                "Set HttpOnly = true, Secure = true, and appropriate SameSite policy in CookieOptions.")
 
             if "UseDeveloperExceptionPage(" in line and not self._inside_development_guard(lines, number):
                 add(number, Severity.MEDIUM, "developer-exception-page",
@@ -227,44 +262,75 @@ class DotNetStaticAnalyzer:
                         "Any non-empty caller-controlled role header authorizes an administrative operation.",
                         "Use authenticated claims and an ASP.NET Core authorization policy.")
 
-            if re.search(r"(?:Problem|BadRequest|StatusCode)\s*\([^;]*error\.Message", line):
-                add(number, Severity.MEDIUM, "exception-detail-exposure",
-                    "An internal exception message is returned to the HTTP client.",
-                    "Return a stable public error and log internal details server-side.")
+            if re.search(r"(?:Problem|BadRequest|StatusCode|Json)\s*\(", context_5):
+                if re.search(r"\b(?:ex|error|exception)\.(?:Message|ToString|StackTrace)\b", context_5):
+                    if re.search(r"Problem|BadRequest|StatusCode|Json", line) or re.search(r"\b(?:ex|error|exception)\.(?:Message|ToString)", line):
+                        add(number, Severity.MEDIUM, "exception-detail-exposure",
+                            "An internal exception message is returned to the HTTP client.",
+                            "Return a stable public error and log internal details server-side.")
 
-            if re.search(r"(?:PhysicalFile|File)\s*\([^;]*Path\.Combine\s*\([^;]*(?:name|fileName)", line, re.I):
+            if re.search(r"(?:PhysicalFile|File)\s*\([^;]*Path\.Combine\s*\([^;]*(?:name|fileName)", context_5, re.I) or \
+               re.search(r"Path\.Combine\s*\([^;]*(?:name|fileName|file\.FileName)", context_5, re.I):
                 if not self._has_path_containment(method):
+                    if re.search(r"Path\.Combine", line) or ("Path.Combine" not in method and re.search(r"PhysicalFile|File\.Create", line)):
+                        add(number, Severity.HIGH, "path-traversal",
+                            "Caller-controlled file input is combined with a server directory without containment validation.",
+                            "Resolve the canonical path and verify it remains under the allowed root.")
+
+            if re.search(r"File\.Create\s*\([^;]*(?:\.FileName|fileName)", context_5, re.I) and not self._has_path_containment(method):
+                if re.search(r"Path\.Combine", line) or ("Path.Combine" not in method and re.search(r"File\.Create", line)):
                     add(number, Severity.HIGH, "path-traversal",
-                        "Caller-controlled file input is combined with a server directory without containment validation.",
-                        "Resolve the canonical path and verify it remains under the allowed root.")
+                        "The client-supplied upload filename controls the server filesystem path.",
+                        "Generate a server-owned name and enforce canonical destination containment.")
 
-            if re.search(r"File\.Create\s*\([^;]*\.FileName", line) and not self._has_path_containment(method):
-                add(number, Severity.HIGH, "path-traversal",
-                    "The client-supplied upload filename controls the server filesystem path.",
-                    "Generate a server-owned name and enforce canonical destination containment.")
-
-            if "IFormFile" in signature and re.search(r"CopyToAsync\s*\(", line):
+            if "IFormFile" in signature and (re.search(r"CopyToAsync\s*\(", method) or re.search(r"File\.Create", method)):
                 if not re.search(r"ContentType|Length|extension|GetExtension|allowed", method, re.I):
-                    add(number, Severity.HIGH, "unrestricted-file-upload",
-                        "The upload is stored without size, type, or extension restrictions.",
-                        "Enforce size limits, validate content and extension allow-lists, and store outside executable paths.")
+                    if re.search(r"CopyToAsync", line) or ("CopyToAsync" not in method and re.search(r"CopyToAsync|File\.Create|IFormFile", line)):
+                        add(number, Severity.HIGH, "unrestricted-file-upload",
+                            "The upload is stored without size, type, or extension restrictions.",
+                            "Enforce size limits, validate content and extension allow-lists, and store outside executable paths.")
 
-            if re.search(r"GetStringAsync\s*\(\s*url\s*\)", line) and "[FromQuery]" in signature:
-                add(number, Severity.HIGH, "ssrf",
-                    "A request-controlled URL reaches an outbound HTTP request.",
-                    "Resolve destinations from an allow-list and block private, loopback, and metadata-network addresses.")
+            if re.search(r"\b(?:GetStringAsync|GetAsync|SendAsync|DownloadString|DownloadData)\s*\(", context_5, re.I) or \
+               re.search(r"httpClient\.(?:GetStringAsync|GetAsync|SendAsync)", context_5, re.I):
+                if not re.search(r"\bUri\s+\w+", signature):
+                    if re.search(r"\b(url|target|destination|address|endpoint)\b", context_5, re.I) or \
+                       re.search(r"\bstring\s+(url|target|uri|destination|address|endpoint)\b", signature, re.I):
+                        if not re.search(r"https?://|Url\.IsLocalUrl|AllowList", method, re.I):
+                            if re.search(r"GetStringAsync|GetAsync|SendAsync|DownloadString|DownloadAsync", line, re.I):
+                                add(number, Severity.HIGH, "ssrf",
+                                    "A request-controlled URL reaches an outbound HTTP request.",
+                                    "Resolve destinations from an allow-list and block private, loopback, and metadata-network addresses.")
 
-            if re.search(r"\bRedirect\s*\(\s*next\s*\)", line) and "[FromQuery]" in signature:
-                add(number, Severity.MEDIUM, "open-redirect",
-                    "A request-controlled destination is used directly for an HTTP redirect.",
-                    "Allow only local URLs or map stable identifiers to server-owned destinations.")
+            if re.search(r"\b(?:Redirect|RedirectPermanent|RedirectPreserveMethod)\s*\(", line, re.I) or \
+               re.search(r"Response\.Redirect\s*\(", line, re.I):
+                if not re.search(r"Url\.IsLocalUrl|LocalRedirect", method):
+                    if re.search(r"\b(returnUrl|redirectUrl|next|url|destination|target)\b", context_5, re.I) or \
+                       re.search(r"\bstring\s+(returnUrl|redirectUrl|next|url|destination|target)\b", signature, re.I):
+                        add(number, Severity.MEDIUM, "open-redirect",
+                            "A request-controlled destination is used directly for an HTTP redirect.",
+                            "Allow only local URLs or map stable identifiers to server-owned destinations.")
 
-            if re.search(r"Process\.Start\s*\([^;]*\+\s*\w+", line) and "[FromQuery]" in signature:
-                add(number, Severity.HIGH, "command-injection",
-                    "Request input is concatenated into an operating-system command.",
-                    "Avoid shell execution or use a fixed executable with validated ArgumentList entries.")
+            if re.search(r"Process\.Start\s*\(", context_5) or re.search(r"new\s+ProcessStartInfo\s*\(", context_5):
+                if re.search(r"cmd\.exe|powershell|bash|/c\s+|\$\"[^\"]*\{|\+\s*\w+", context_5, re.I):
+                    if re.search(r"\b(host|cmd|args|command|input|url)\b", method, re.I) or \
+                       re.search(r"\bstring\s+(host|cmd|args|command|input|url)\b", signature, re.I):
+                        if not re.search(r"ArgumentList", method):
+                            if re.search(r"Process\.Start|new\s+ProcessStartInfo|ProcessStartInfo", line):
+                                add(number, Severity.HIGH, "command-injection",
+                                    "Request input is concatenated into an operating-system command.",
+                                    "Avoid shell execution or use a fixed executable with validated ArgumentList entries.")
+                            elif not re.search(r"Process\.Start|ProcessStartInfo", method) and not line.strip().startswith("[") and re.search(r"cmd\.exe|powershell|bash|/c\s+", line, re.I):
+                                add(number, Severity.HIGH, "command-injection",
+                                    "Request input is concatenated into an operating-system command.",
+                                    "Avoid shell execution or use a fixed executable with validated ArgumentList entries.")
 
-            if "[FromBody]" in signature and re.search(r"\b(?:UserAccount|\w*Entity)\s+\w+", signature):
+            if re.search(r"\b(?:IsAdministrator|IsAdmin|Role|Roles|Permissions|TenantId|OwnerId|AccountStatus|IsSuperuser)\s*=\s*(?:request|input)\.(?:IsAdministrator|IsAdmin|Role|Roles|Permissions|TenantId|OwnerId|AccountStatus|IsSuperuser)\b", line, re.I) or \
+               re.search(r"\b(?:\w+\.)?(?:IsAdministrator|IsAdmin|Role|Roles|Permissions|TenantId|OwnerId|AccountStatus|IsSuperuser)\s*=\s*(?:request|input)\.", line, re.I):
+                add(number, Severity.HIGH, "mass-assignment",
+                    "Client-controlled request properties are copied directly into privileged domain fields.",
+                    "Use explicit DTO mapping and enforce authorization checks before modifying privileged domain fields.")
+
+            if "[FromBody]" in signature and re.search(r"\b(?:UserAccount|UserRecord|\w*Entity)\s+\w+", signature):
                 anchor = self._signature_line(lines, number)
                 if anchor == number:
                     add(number, Severity.HIGH, "mass-assignment",
@@ -276,9 +342,10 @@ class DotNetStaticAnalyzer:
                     "A password value is written to application logs.",
                     "Never log credentials or secret values.")
 
-            if "[HttpPost(\"reindex\")]" in line or "[HttpPost(\"refresh\")]" in line:
+            if re.search(r"\[Http(?:Put|Post|Delete|Patch)\s*\([^)]*(?:admin|reindex|refresh|manage|update|delete)", line, re.I) or \
+               (re.search(r"\[Http(?:Put|Post|Delete|Patch)", line) and re.search(r"admin|administrator|manage", signature, re.I)):
                 controller = "\n".join(lines)
-                if "[Authorize" not in controller:
+                if "[Authorize" not in controller and "[AllowAnonymous]" not in line and "[AllowAnonymous]" not in context_5:
                     add(number, Severity.HIGH, "missing-endpoint-authorization",
                         "A state-changing administrative endpoint has no authorization requirement.",
                         "Require an authenticated policy or administrative role for this endpoint.")
@@ -370,7 +437,12 @@ class DotNetStaticAnalyzer:
 
     @staticmethod
     def _block_is_empty(lines: list[str], number: int) -> bool:
-        return bool(re.search(r"catch\s*\([^)]*\)\s*\{\s*\}", " ".join(lines[number - 1:number + 3])))
+        block = "\n".join(lines[number - 1:min(len(lines), number + 6)])
+        match = re.search(r"catch\s*(?:\([^)]*\))?\s*\{([^}]*)\}", block, re.DOTALL)
+        if not match:
+            return False
+        body = match.group(1).strip()
+        return not bool(re.search(r"\S", body))
 
     @staticmethod
     def _disposed_later(method: str, name: str) -> bool:
@@ -403,22 +475,49 @@ class DotNetStaticAnalyzer:
         line = lines[number - 1]
         method = cls._method_text(lines, number)
         if re.search(r"Assert\.Equal\s*\([^;]*\.Page\s*\)", line) and not re.search(r"\.Items\b", method):
-            add(number, Severity.MEDIUM, "insufficient-test-assertion",
+            add(number, Severity.LOW, "insufficient-test-assertion",
                 "The pagination test checks metadata without verifying returned records.",
                 "Assert item boundaries and page contents.")
         if re.search(r"Assert\.Equal\s*\(\s*0\s*,[^;]*Parse", line):
-            add(number, Severity.MEDIUM, "insufficient-test-assertion",
+            add(number, Severity.LOW, "insufficient-test-assertion",
                 "The test accepts a valid zero value when parsing invalid input.",
                 "Assert the explicit failure contract or expected parsing exception.")
         if "Assert.IsType<OkObjectResult>" in line and ".Update(" in line:
-            add(number, Severity.MEDIUM, "insufficient-test-assertion",
+            add(number, Severity.LOW, "insufficient-test-assertion",
                 "The update test checks only the action-result type.",
                 "Verify that protected fields cannot be changed and that persistence receives only allowed values.")
         if "Assert.NotNull(" in line and ".Clear(" in line:
-            add(number, Severity.MEDIUM, "insufficient-test-assertion",
+            add(number, Severity.LOW, "insufficient-test-assertion",
                 "The administrative endpoint test does not verify its authorization policy.",
                 "Assert unauthorized and forbidden outcomes for unauthenticated and unprivileged callers.")
-        if "Assert.NotNull(result)" in line and "attacker.example" in method:
-            add(number, Severity.MEDIUM, "insufficient-test-assertion",
-                "The redirect test accepts an external destination.",
-                "Assert that external redirects are rejected or converted to a safe local destination.")
+        # High-confidence C# test capability for xUnit, NUnit, MSTest, FluentAssertions
+        is_existence_assertion = bool(re.search(
+            r"\b(?:Assert\.NotNull|Assert\.IsNotNull|Assert\.True\s*\([^;]*!=\s*null|Should\(\)\.NotBeNull)\b",
+            line,
+            re.IGNORECASE,
+        ))
+        if is_existence_assertion:
+            executes_api = bool(re.search(
+                r"\b(?:controller\.\w+|client\.(?:Get|Post|Put|Delete|Send|Patch)\w*Async|client\.GetStringAsync|httpClient\.\w+)\b",
+                method,
+                re.IGNORECASE,
+            ))
+            meaningful_verifications = bool(re.search(
+                r"\b(?:Assert\.Equal|Assert\.Same|Assert\.Equivalent|Assert\.Contains|Assert\.Throws|Assert\.ThrowsAsync|Should\(\)\.Be|Should\(\)\.BeEquivalentTo|StatusCode|IsSuccessStatusCode|OkObjectResult|BadRequestResult|UnauthorizedResult|NotFoundResult|Content|Value|Items)\b",
+                method,
+                re.IGNORECASE,
+            ))
+            sig = cls._method_signature(lines, number)
+            is_smoke_test = bool(re.search(
+                r"\b(?:smoke|constructor|createinstance|factory|instantiate)\b",
+                sig,
+                re.IGNORECASE,
+            ))
+            if executes_api and not meaningful_verifications and not is_smoke_test:
+                add(
+                    number,
+                    Severity.LOW,
+                    "insufficient-test-assertion",
+                    "The test executes an HTTP/API operation but only asserts object existence (NotNull), failing to verify response status, payload content, or security policy.",
+                    "Assert specific response status codes, returned body fields, or security outcome behavior.",
+                )

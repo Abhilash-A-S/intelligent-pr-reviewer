@@ -213,6 +213,7 @@ class FindingProcessor:
                 self._print_rejection(
                     finding=finding,
                     reasons=validation.reasons,
+                    stage="Validation",
                 )
 
                 validation_rejected += 1
@@ -228,7 +229,11 @@ class FindingProcessor:
             changed_file = changed_file_map[finding.file_path]
             validation = self.semantic_evidence_validator.validate(finding, changed_file)
             if not validation.accepted:
-                self._print_rejection(finding=finding, reasons=validation.reasons)
+                self._print_rejection(
+                    finding=finding,
+                    reasons=validation.reasons,
+                    stage="Semantic Validation",
+                )
                 semantic_rejected += 1
                 continue
             semantic_validated_findings.append(finding)
@@ -258,6 +263,7 @@ class FindingProcessor:
                 self._print_rejection(
                     finding=finding,
                     reasons=validation.reasons,
+                    stage="Ownership",
                 )
                 ownership_rejected += 1
                 continue
@@ -483,17 +489,22 @@ class FindingProcessor:
         # 7. Deduplicate
         # --------------------------------------------------
 
-        final_findings = (
-            self.deduplicator.deduplicate(
+        final_findings, removed_duplicates = (
+            self.deduplicator.deduplicate_with_details(
                 policy_findings,
                 changed_files=changed_files,
             )
         )
 
-        duplicates_removed = (
-            len(policy_findings)
-            - len(final_findings)
-        )
+        for removed_finding, equivalent_to, reason in removed_duplicates:
+            self._print_rejection(
+                finding=removed_finding,
+                reasons=[reason],
+                stage="Deduplication",
+                equivalent_to=equivalent_to,
+            )
+
+        duplicates_removed = len(removed_duplicates)
 
         # --------------------------------------------------
         # 8. Professional presentation metadata
@@ -581,16 +592,30 @@ class FindingProcessor:
     def _print_rejection(
         finding: Finding,
         reasons: list[str],
+        stage: str = "Validation",
+        equivalent_to: Finding | None = None,
     ) -> None:
+
+        orig_rule = getattr(finding, "original_rule_id", None) or finding.rule_id
+        canon_rule = finding.rule_id
 
         print(
             f"🛡️ Rejected finding: "
             f"{finding.file_path}:"
             f"{finding.line_number} "
-            f"[{finding.rule_id}]"
+            f"[{canon_rule}]"
         )
+        print(f"   Stage : {stage}")
+        if orig_rule != canon_rule:
+            print(f"   Rule  : Original: {orig_rule} -> Canonical: {canon_rule}")
+        else:
+            print(f"   Rule  : {canon_rule}")
 
         for reason in reasons:
             print(
                 f"   Reason: {reason}"
+            )
+        if equivalent_to:
+            print(
+                f"   Equivalent to: {equivalent_to.file_path}:{equivalent_to.line_number} [{equivalent_to.rule_id}]"
             )

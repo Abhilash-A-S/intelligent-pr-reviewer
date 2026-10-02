@@ -199,6 +199,27 @@ class FindingNormalizer:
         "accessibility-problem": "accessibility",
         "a11y": "accessibility",
         "a11y-issue": "accessibility",
+
+        # C# / .NET aliases
+        "credentialed-cors": "cors-misconfiguration",
+        "missing-authorization": "missing-endpoint-authorization",
+
+        # Test assertion quality
+        "weak-test": "insufficient-test-assertion",
+        "weak-assertion": "insufficient-test-assertion",
+        "weak-test-assertion": "insufficient-test-assertion",
+        "insufficient-assertion": "insufficient-test-assertion",
+        "insufficient-test-assertions": "insufficient-test-assertion",
+        "insufficient-assertions": "insufficient-test-assertion",
+        "weak-test-assertions": "insufficient-test-assertion",
+        "test-assertion": "insufficient-test-assertion",
+        "test-quality": "insufficient-test-assertion",
+        "incomplete-assertion": "insufficient-test-assertion",
+        "weak-assertion-in-test": "insufficient-test-assertion",
+        "missing-test-assertion": "insufficient-test-assertion",
+
+        # Upload security rule ID consistency
+        "upload-security": "unrestricted-file-upload",
     }
 
     # Prefixes commonly invented by LLMs. We strip one or
@@ -295,6 +316,10 @@ class FindingNormalizer:
             severity=finding.severity,
         )
 
+        category = finding.category
+        if rule_id == "insufficient-test-assertion":
+            category = "test-quality"
+
         return Finding(
             file_path=finding.file_path.strip(),
             line_number=finding.line_number,
@@ -308,11 +333,12 @@ class FindingNormalizer:
             ),
             diff_position=finding.diff_position,
             source=finding.source,
-            category=finding.category,
+            category=category,
             issue=finding.issue,
             impact=finding.impact,
             evidence=finding.evidence,
             confidence=finding.confidence,
+            original_rule_id=finding.original_rule_id or finding.rule_id,
         )
 
 
@@ -521,14 +547,16 @@ class FindingNormalizer:
             if definition is not None and definition.minimum_severity is not None
             else cls.MINIMUM_SEVERITY.get(rule_id)
         )
+        maximum = (
+            definition.max_severity
+            if definition is not None and definition.max_severity is not None
+            else None
+        )
 
-        if minimum is None:
-            return severity
+        res = severity
+        if minimum is not None and cls.SEVERITY_ORDER[res] < cls.SEVERITY_ORDER[minimum]:
+            res = minimum
+        if maximum is not None and cls.SEVERITY_ORDER[res] > cls.SEVERITY_ORDER[maximum]:
+            res = maximum
 
-        if (
-            cls.SEVERITY_ORDER[severity]
-            < cls.SEVERITY_ORDER[minimum]
-        ):
-            return minimum
-
-        return severity
+        return res

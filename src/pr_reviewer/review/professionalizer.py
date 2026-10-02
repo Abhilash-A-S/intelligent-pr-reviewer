@@ -62,6 +62,7 @@ class FindingProfessionalizer:
         "dbcontext-concurrency": "DbContext does not support parallel operations and may throw or corrupt unit-of-work behavior.",
         "singleton-mutable-state": "Request or tenant data can leak between users when stored in shared singleton state.",
         "cors-misconfiguration": "An attacker-controlled origin may issue credentialed cross-origin requests as the signed-in user.",
+        "insecure-cookie": "Cookies set without HttpOnly, Secure, or SameSite attributes can be exposed to script access or cross-site requests.",
         "developer-exception-page": "Detailed exceptions can expose stack traces, paths, queries, and internal implementation data.",
         "dependency-lifetime": "A long-lived service can retain a disposed scoped dependency or reuse request state across operations.",
         "background-cancellation": "The hosted service may prevent graceful shutdown and continue work after cancellation.",

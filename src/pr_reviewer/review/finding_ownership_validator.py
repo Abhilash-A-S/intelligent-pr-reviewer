@@ -56,6 +56,27 @@ class FindingOwnershipValidator:
                 ],
             )
 
+        path_lower = finding.file_path.lower().replace("\\", "/")
+        is_test_file = (
+            "/tests/" in f"/{path_lower}"
+            or "/test/" in f"/{path_lower}"
+            or path_lower.endswith(("test.cs", "tests.cs", "spec.ts", "specs.ts", "test.py", "test.js", "test.ts", "test.java"))
+        )
+        is_test_rule = (
+            finding.rule_id == "insufficient-test-assertion"
+            or finding.category == "test-quality"
+        )
+
+        # Reject AI findings in test files that attribute production vulnerabilities to test files
+        if is_test_file and not is_test_rule:
+            if definition.category in {"security", "reliability", "correctness", "performance"}:
+                return OwnershipValidationResult(
+                    False,
+                    [
+                        f"Production vulnerability or defect '{finding.rule_id}' belongs to production source code, not test file '{finding.file_path}'."
+                    ],
+                )
+
         # Even AI-owned semantic categories cannot create a second finding for
         # a root cause that deterministic/framework/compiler analysis has already
         # proven. Match by defect semantics + nearby source location, not merely

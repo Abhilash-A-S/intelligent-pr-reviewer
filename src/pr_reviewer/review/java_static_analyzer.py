@@ -224,7 +224,7 @@ class JavaStaticAnalyzer:
                 ))
                 is_validated = has_content_type_call and (has_mime_allowlist or has_extension_allowlist)
                 if not is_validated:
-                    add(number, Severity.MEDIUM, "upload-security",
+                    add(number, Severity.MEDIUM, "unrestricted-file-upload",
                         "A multipart file is accepted without validating the declared content type or filename extension.",
                         "Verify the MIME type against a server-side allow-list, generate a server-owned filename, enforce a maximum upload size, and store files outside the application root.")
 

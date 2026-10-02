@@ -74,3 +74,4 @@ class Finding:
     impact: str | None = None
     evidence: str | None = None
     confidence: str | None = None
+    original_rule_id: str | None = None

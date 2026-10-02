@@ -42,6 +42,26 @@ class DotNetRuntimeFactValidator:
             subject = quoted[0]
             if subject not in target and not re.search(rf"\b{re.escape(subject)}\b", method):
                 return [f"The claimed subject '{subject}' is not part of the targeted source construct."]
+
+        # Reject SQL injection claim if target construct is an HTTP client call without SQL SINK
+        if finding.rule_id == "sql-injection" or "sql injection" in claim.lower():
+            if ("httpclient" in method.lower() or "getasync" in method.lower() or "getstringasync" in method.lower()) and not re.search(r"SELECT|INSERT|UPDATE|DELETE|FromSql|ExecuteSql", method, re.I):
+                return ["The targeted construct is an HTTP client operation, not a SQL query execution sink."]
+
+        # Reject Command injection claim if target construct does not involve process start or shell execution
+        if finding.rule_id == "command-injection" or "command injection" in claim.lower():
+            if "process" not in method.lower() and "cmd" not in method.lower() and "powershell" not in method.lower():
+                return ["The targeted method does not perform process or shell execution."]
+
+        # Reject Open redirect claim if target file is a test file
+        path_lower = changed_file.file_path.lower().replace("\\", "/")
+        if (finding.rule_id == "open-redirect" or "open redirect" in claim.lower()) and ("/tests/" in f"/{path_lower}" or path_lower.endswith(("test.cs", "tests.cs"))):
+            return ["Open redirect findings cannot be attributed to test files."]
+
+        # Reject Unsafe code execution claim if target construct is token hashing
+        if (finding.rule_id == "unsafe-code-execution" or "code execution" in claim.lower()) and ("hash" in method.lower() or "md5" in method.lower() or "sha" in method.lower()):
+            return ["The targeted construct performs cryptographic hashing, not dynamic code execution."]
+
         return []
 
     @staticmethod

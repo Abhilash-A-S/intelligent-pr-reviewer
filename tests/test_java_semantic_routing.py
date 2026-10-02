@@ -284,7 +284,7 @@ public class Item {
         """
         cf = java_file(content, path="src/main/java/com/example/UserController.java")
         findings = JavaStaticAnalyzer().analyze(cf)
-        upload_findings = [f for f in findings if f.rule_id == "upload-security"]
+        upload_findings = [f for f in findings if f.rule_id == "unrestricted-file-upload"]
         assert len(upload_findings) == 0
 
 

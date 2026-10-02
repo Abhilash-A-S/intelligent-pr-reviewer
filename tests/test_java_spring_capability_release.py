@@ -50,7 +50,7 @@ def inline_java(content: str, path: str = "src/main/java/example/Sample.java") -
     # Sequential outbound HTTP calls
     ("class X { String combine(@RequestParam String a, @RequestParam String b) {\n  String r1 = restTemplate.getForObject(a, String.class);\n  String r2 = restTemplate.getForObject(b, String.class);\n  return r1 + r2;\n} }", "sequential-io-operations"),
     # Unsafe multipart upload (no content-type check)
-    ("class X { void upload(MultipartFile file) throws Exception { Files.copy(file.getInputStream(), Path.of(file.getOriginalFilename())); } }", "upload-security"),
+    ("class X { void upload(MultipartFile file) throws Exception { Files.copy(file.getInputStream(), Path.of(file.getOriginalFilename())); } }", "unrestricted-file-upload"),
 ])
 
 def test_java_high_confidence_capabilities(source, rule):
@@ -177,4 +177,4 @@ def test_upload_with_content_type_check_is_clean():
 """
     findings = JavaStaticAnalyzer().analyze(inline_java(source))
     rule_ids = {f.rule_id for f in findings}
-    assert "upload-security" not in rule_ids
+    assert "unrestricted-file-upload" not in rule_ids

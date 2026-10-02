@@ -255,3 +255,259 @@ def test_dotnet_fact_validator_rejects_cross_method_evidence():
 
 def test_aspnet_file_context_is_backend():
     assert FileContextResolver._project_type("aspnet-core") == "backend"
+
+
+def test_csharp_rule_deduplication_in_single_method():
+    source = """
+        class TestController : ControllerBase {
+            [HttpPost("upload")]
+            public async Task<IActionResult> Upload(IFormFile file) {
+                var path = Path.Combine(root, file.FileName);
+                await using var stream = File.Create(path);
+                await file.CopyToAsync(stream);
+                return Ok();
+            }
+
+            [HttpPost("cmd")]
+            public IActionResult Exec([FromQuery] string host) {
+                var cmd = $"ping {host}";
+                Process.Start("cmd.exe", $"/c {cmd}");
+                return Ok();
+            }
+
+            public void ConfigureCors(IApplicationBuilder app) {
+                app.UseCors(policy => {
+                    policy.SetIsOriginAllowed(_ => true)
+                          .AllowAnyHeader()
+                          .AllowCredentials();
+                });
+            }
+        }
+    """
+    analyzer = DotNetStaticAnalyzer()
+    file = source_file(source, "src/Api/TestController.cs")
+    findings = analyzer.analyze(file)
+
+    cors_findings = [f for f in findings if f.rule_id == "cors-misconfiguration"]
+    upload_findings = [f for f in findings if f.rule_id == "unrestricted-file-upload"]
+    path_findings = [f for f in findings if f.rule_id == "path-traversal"]
+    cmd_findings = [f for f in findings if f.rule_id == "command-injection"]
+
+    assert len(cors_findings) == 1
+    assert len(upload_findings) == 1
+    assert len(path_findings) == 1
+    assert len(cmd_findings) == 1
+
+    lines = file.full_content.splitlines()
+    assert "SetIsOriginAllowed" in lines[cors_findings[0].line_number - 1]
+    assert "CopyToAsync" in lines[upload_findings[0].line_number - 1]
+    assert "Path.Combine" in lines[path_findings[0].line_number - 1]
+    assert "Process.Start" in lines[cmd_findings[0].line_number - 1]
+
+
+def test_csharp_routing_gates_covered_methods():
+    source = """
+        class Controller {
+            public IActionResult Ping([FromQuery] string host) {
+                Process.Start("cmd.exe", $"/c {host}");
+                return Ok();
+            }
+        }
+    """
+    file = source_file(source, "src/Api/Controller.cs")
+    analyzer = DotNetStaticAnalyzer()
+    static_findings = analyzer.analyze(file)
+    covered_lines = {f.line_number for f in static_findings}
+
+    router = AdaptiveSemanticRouter()
+    decision = router.decide(file, covered_lines, ReviewDepth.STANDARD)
+    assert not decision.eligible
+    assert "covered by authoritative static findings" in decision.reason
+
+
+def test_command_injection_anchors_strictly_to_process_start():
+    source = """
+        class Controller : ControllerBase {
+            [HttpGet("ping")]
+            public IActionResult Ping([FromQuery] string host) {
+                var cmd = $"ping {host}";
+                Process.Start("cmd.exe", $"/c {cmd}");
+                return Ok();
+            }
+        }
+    """
+    file = source_file(source, "src/Api/Controller.cs")
+    analyzer = DotNetStaticAnalyzer()
+    findings = analyzer.analyze(file)
+    cmd_findings = [f for f in findings if f.rule_id == "command-injection"]
+    assert len(cmd_findings) == 1
+    lines = file.full_content.splitlines()
+    matched_line = lines[cmd_findings[0].line_number - 1]
+    assert "[HttpGet(" not in matched_line
+    assert "Process.Start" in matched_line
+
+
+def test_weak_assertion_finding_classified_as_test_quality():
+    source = """
+        class ControllerTest {
+            public void TestUpdate() {
+                Assert.IsType<OkObjectResult>(controller.Update(1, account));
+            }
+        }
+    """
+    file = source_file(source, "tests/ControllerTest.cs")
+    analyzer = DotNetStaticAnalyzer()
+    findings = analyzer.analyze(file)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "insufficient-test-assertion"
+    assert findings[0].severity == Severity.LOW
+
+    from pr_reviewer.review.normalizer import FindingNormalizer
+    normalized = FindingNormalizer().normalize(findings[0])
+    assert normalized.category == "test-quality"
+    assert normalized.severity == Severity.LOW
+
+
+def test_isqlexecutor_and_safe_controllers_gated_by_router():
+    isql = source_file("""
+        public interface ISqlExecutor {
+            /// <returns>The number of affected rows</returns>
+            Task<int> ExecuteAsync(string sql, CancellationToken cancellationToken);
+        }
+    """, "src/Data/ISqlExecutor.cs")
+
+    safe_controller = source_file("""
+        public class SafeUserController : ControllerBase {
+            public IActionResult GetUser(int id) => Ok(id);
+        }
+    """, "src/Controllers/SafeUserController.cs")
+
+    clean_config = source_file("""
+        {
+          "Logging": { "LogLevel": { "Default": "Information" } }
+        }
+    """, "src/appsettings.json")
+
+    router = AdaptiveSemanticRouter()
+    assert not router.decide(isql, set(), ReviewDepth.STANDARD).eligible
+    assert not router.decide(safe_controller, set(), ReviewDepth.STANDARD).eligible
+    assert not router.decide(clean_config, set(), ReviewDepth.STANDARD).eligible
+
+
+def test_ai_weak_test_finding_survives_and_is_not_deduplicated_against_production_finding(capsys):
+    from pr_reviewer.review.processor import FindingProcessor
+    from pr_reviewer.review.models import FindingSource, Severity, Finding
+
+    test_file = source_file("""
+        public class UnsafeApiTests {
+            public void RedirectTest() {
+                var result = controller.Continue("https://attacker.example");
+                Assert.NotNull(result);
+            }
+        }
+    """, "tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs")
+
+    controller_file = source_file("""
+        public class UnsafeUserController {
+            public IActionResult Continue(string url) => Redirect(url);
+        }
+    """, "src/ReviewFixture.Api/Controllers/UnsafeUserController.cs")
+
+    # Authoritative production finding
+    prod_finding = Finding(
+        file_path=controller_file.file_path,
+        line_number=3,
+        severity=Severity.HIGH,
+        rule_id="open-redirect",
+        message="Unvalidated redirect allows open redirection.",
+        source=FindingSource.STATIC,
+    )
+
+    # Raw AI finding 1: Open redirect erroneously placed on test file
+    ai_prod_finding = Finding(
+        file_path=test_file.file_path,
+        line_number=3,
+        severity=Severity.HIGH,
+        rule_id="open-redirect",
+        message="Open redirect vulnerability in test setup.",
+        source=FindingSource.LLM,
+    )
+
+    # Raw AI finding 2: Weak assertion on test file
+    ai_test_finding = Finding(
+        file_path=test_file.file_path,
+        line_number=4,
+        severity=Severity.LOW,
+        rule_id="weak-assertion",
+        message="The test accepts an external redirect without verifying destination safety.",
+        source=FindingSource.LLM,
+    )
+
+    processor = FindingProcessor()
+    processed = processor.process(
+        findings=[prod_finding, ai_prod_finding, ai_test_finding],
+        changed_files=[test_file, controller_file],
+    )
+
+    captured = capsys.readouterr().out
+
+    # Verify AI production finding on test file was rejected by Ownership
+    assert "Stage : Ownership" in captured
+    assert "Production vulnerability or defect 'open-redirect' belongs to production source code" in captured
+
+    # Verify AI test finding survived as LOW | test-quality | insufficient-test-assertion
+    test_findings = [f for f in processed if f.file_path == test_file.file_path]
+    assert len(test_findings) == 1
+    assert test_findings[0].rule_id == "insufficient-test-assertion"
+    assert test_findings[0].category == "test-quality"
+    assert test_findings[0].severity == Severity.LOW
+
+    # Verify total findings count (1 prod + 1 test = 2)
+    assert len(processed) == 2
+
+
+def test_deduplication_prints_detailed_rejection_output(capsys):
+    from pr_reviewer.review.processor import FindingProcessor
+    from pr_reviewer.review.models import FindingSource, Severity, Finding
+
+    file = source_file("""
+        public class UnsafeApiTests {
+            public void RedirectTest() {
+                var result = controller.Continue("https://attacker.example");
+                Assert.NotNull(result);
+            }
+        }
+    """, "tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs")
+
+    ai_finding1 = Finding(
+        file_path=file.file_path,
+        line_number=4,
+        severity=Severity.LOW,
+        rule_id="insufficient-test-assertion",
+        message="The test accepts an external redirect without verifying destination safety.",
+        source=FindingSource.LLM,
+    )
+
+    ai_finding2 = Finding(
+        file_path=file.file_path,
+        line_number=4,
+        severity=Severity.LOW,
+        rule_id="insufficient-test-assertion",
+        message="Test assertion does not check response destination.",
+        source=FindingSource.LLM,
+    )
+
+    processor = FindingProcessor()
+    processed = processor.process(
+        findings=[ai_finding1, ai_finding2],
+        changed_files=[file],
+    )
+
+    captured = capsys.readouterr().out
+
+    assert "Stage : Deduplication" in captured
+    assert "Reason: Duplicate of finding at tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
+    assert "Equivalent to: tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
+    assert len(processed) == 1
+
+

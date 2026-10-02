@@ -455,7 +455,7 @@ DEFAULT_RULE_DEFINITIONS = (
     ),
     RuleDefinition(
         "insufficient-test-assertion", "test-quality", RuleOwner.AI, AIPolicy.VALIDATE,
-        max_severity=Severity.MEDIUM,
+        max_severity=Severity.LOW,
         capabilities=("test-evidence-analysis",),
     ),
     RuleDefinition(
@@ -578,12 +578,6 @@ DEFAULT_RULE_DEFINITIONS = (
         capabilities=("api-boundary-analysis", "security-sink-analysis"),
     ),
     RuleDefinition(
-        "upload-security", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
-        minimum_severity=Severity.MEDIUM,
-        aliases=("unsafe-file-upload", "missing-upload-validation", "unrestricted-file-upload"),
-        capabilities=("api-boundary-analysis", "security-sink-analysis"),
-    ),
-    RuleDefinition(
         "missing-input-validation", "reliability", RuleOwner.STATIC, AIPolicy.BLOCK,
         max_severity=Severity.MEDIUM,
         aliases=("request-validation-missing", "missing-validation", "unvalidated-request-body"),
@@ -622,8 +616,14 @@ DEFAULT_RULE_DEFINITIONS = (
     RuleDefinition(
         "missing-endpoint-authorization", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
         minimum_severity=Severity.HIGH,
-        aliases=("missing-authorize", "unprotected-endpoint"),
+        aliases=("missing-authorize", "unprotected-endpoint", "missing-authorization"),
         capabilities=("authorization-flow-analysis",),
+    ),
+    RuleDefinition(
+        "insecure-cookie", "security", RuleOwner.STATIC, AIPolicy.BLOCK,
+        minimum_severity=Severity.HIGH,
+        aliases=("missing-httponly-cookie", "missing-secure-cookie", "insecure-cookie-header"),
+        capabilities=("security-sink-analysis", "configuration-analysis"),
     ),
     RuleDefinition(
         "debug-logging", "security", RuleOwner.STATIC, AIPolicy.BLOCK,

@@ -84,26 +84,43 @@ class FindingDeduplicator:
         findings: list[Finding],
         changed_files: list | None = None,
     ) -> list[Finding]:
+        retained, _ = self.deduplicate_with_details(findings, changed_files)
+        return retained
+
+    def deduplicate_with_details(
+        self,
+        findings: list[Finding],
+        changed_files: list | None = None,
+    ) -> tuple[list[Finding], list[tuple[Finding, Finding, str]]]:
         changed_file_map = {
             self._normalize_path(changed_file.file_path): changed_file
             for changed_file in (changed_files or [])
         }
-        result: list[Finding] = []
+        retained: list[Finding] = []
+        removed: list[tuple[Finding, Finding, str]] = []
+
         for finding in findings:
-            duplicate_index = self._find_duplicate_index(result, finding, changed_file_map)
+            duplicate_index = self._find_duplicate_index(retained, finding, changed_file_map)
             if duplicate_index is None:
-                result.append(finding)
+                retained.append(finding)
                 continue
-            existing = result[duplicate_index]
+            existing = retained[duplicate_index]
             if self._is_stronger(finding, existing):
-                result[duplicate_index] = finding
-        return result
+                retained[duplicate_index] = finding
+                reason = f"Duplicate of stronger finding at {finding.file_path}:{finding.line_number} [{finding.rule_id}]"
+                removed.append((existing, finding, reason))
+            else:
+                reason = f"Duplicate of finding at {existing.file_path}:{existing.line_number} [{existing.rule_id}]"
+                removed.append((finding, existing, reason))
+
+        return retained, removed
 
     def _find_duplicate_index(self, findings: list[Finding], candidate: Finding, changed_file_map: dict | None = None) -> int | None:
         candidate_path = self._normalize_path(candidate.file_path)
         candidate_rule = candidate.rule_id.strip().lower()
         candidate_family = self._rule_family(candidate_rule)
         candidate_subject = self._quoted_subject(candidate.message)
+        is_candidate_test = (candidate_rule == "insufficient-test-assertion" or candidate.category == "test-quality")
 
         for index, existing in enumerate(findings):
             if self._normalize_path(existing.file_path) != candidate_path:
@@ -113,6 +130,10 @@ class FindingDeduplicator:
             existing_family = self._rule_family(existing_rule)
             existing_subject = self._quoted_subject(existing.message)
             same_line = existing.line_number == candidate.line_number
+            is_existing_test = (existing_rule == "insufficient-test-assertion" or existing.category == "test-quality")
+
+            if is_candidate_test != is_existing_test:
+                continue
 
             # Exact same canonical rule + line is normally a duplicate, but not when a
             # single statement/signature contains multiple distinct named subjects
@@ -133,7 +154,7 @@ class FindingDeduplicator:
             candidate_auth = candidate.source in self.AUTHORITATIVE_SOURCES
             existing_auth = existing.source in self.AUTHORITATIVE_SOURCES
             if candidate_auth != existing_auth:
-                if line_distance <= 4:
+                if line_distance <= 4 and (existing_rule == candidate_rule or (existing_family and existing_family == candidate_family)):
                     return index
 
             if candidate_family is None or existing_family != candidate_family:

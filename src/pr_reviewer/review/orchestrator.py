@@ -940,6 +940,16 @@ class ReviewOrchestrator:
             f"{len(llm_findings)}"
         )
 
+        for finding in llm_findings:
+            orig_rule = getattr(finding, "original_rule_id", None) or finding.rule_id
+            print(
+                f"   🤖 {finding.file_path}:"
+                f"{finding.line_number} "
+                f"[{finding.rule_id}] "
+                f"(original: {orig_rule}, severity: {finding.severity.value}) - "
+                f"{finding.message}"
+            )
+
         print(
             f"Combined        : "
             f"{len(raw_findings)}"

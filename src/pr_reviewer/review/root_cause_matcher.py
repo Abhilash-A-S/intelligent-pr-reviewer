@@ -192,6 +192,12 @@ class RootCauseMatcher:
         if not patterns:
             return False
 
+        ai_rule = self.registry.resolve(ai_finding.rule_id)
+        is_ai_test = (ai_rule == "insufficient-test-assertion" or ai_finding.category == "test-quality")
+        is_auth_test = (canonical == "insufficient-test-assertion" or authoritative.category == "test-quality")
+        if is_ai_test != is_auth_test:
+            return False
+
         if ai_finding.file_path != authoritative.file_path:
             ai_text = self._finding_text(ai_finding).lower()
             enclosing = self._enclosing_function_for(authoritative, changed_file_map)
