@@ -179,6 +179,84 @@ def test_xunit_weak_assertion_capabilities():
     assert rules(source, "tests/AppTests.cs") == ["insufficient-test-assertion"] * 5
 
 
+def test_http_client_field_with_existence_only_assertion_is_reported():
+    source = """
+        public sealed class UnsafeApiTests {
+          private readonly HttpClient _client;
+          [Fact]
+          public async Task ExternalRedirect_ReturnsAResponse() {
+            using var response = await _client.GetAsync(
+              "/api/unsafe/users/redirect?returnUrl=https%3A%2F%2Fevil.example");
+            Assert.NotNull(response);
+          }
+        }
+    """
+    assert rules(source, "tests/UnsafeApiTests.cs") == ["insufficient-test-assertion"]
+
+
+def test_reading_response_properties_does_not_count_as_a_test_verification():
+    source = """
+        public sealed class Tests {
+          public async Task ReadOnly() {
+            using var response = await apiClient.GetAsync("/users");
+            var body = await response.Content.ReadAsStringAsync();
+            var status = response.StatusCode;
+            Assert.NotNull(response);
+          }
+        }
+    """
+    assert rules(source, "tests/ApiTests.cs") == ["insufficient-test-assertion"]
+
+
+def test_nunit_mstest_and_fluent_existence_only_assertions_are_reported():
+    source = """
+        public sealed class Tests {
+          public async Task NUnitTest() { using var response = await _client.GetAsync("/nunit"); Assert.That(response, Is.Not.Null); }
+          public async Task MsTest() { using var response = await httpClient.GetAsync("/mstest"); Assert.IsNotNull(response); }
+          public async Task MsTrueTest() { using var response = await testClient.GetAsync("/true"); Assert.IsTrue(response is not null); }
+          public async Task FluentTest() { using var response = await apiClient.GetAsync("/fluent"); response.Should().NotBeNull(); }
+        }
+    """
+    assert rules(source, "tests/FrameworkTests.cs") == ["insufficient-test-assertion"] * 4
+
+
+def test_meaningful_http_assertions_and_smoke_construction_remain_clean():
+    source = """
+        public sealed class Tests {
+          public async Task StatusAndBody() {
+            using var response = await _client.GetAsync("/users");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<User>();
+            Assert.NotNull(payload);
+            Assert.Equal("active", payload.Status);
+          }
+          public async Task FluentStatus() {
+            using var response = await apiClient.GetAsync("/users");
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            response.Should().NotBeNull();
+          }
+          public void ConstructorSmokeTest() {
+            var controller = new UsersController();
+            Assert.NotNull(controller);
+          }
+        }
+    """
+    assert rules(source, "tests/SafeApiTests.cs") == []
+
+
+def test_unchanged_existence_assertion_cannot_create_a_pr_finding():
+    source = """
+        public sealed class Tests {
+          public async Task ApiTest() {
+            using var response = await _client.GetAsync("/users");
+            Assert.NotNull(response);
+          }
+        }
+    """
+    changed_file = source_file(source, "tests/ApiTests.cs", changed_numbers={3})
+    assert DotNetStaticAnalyzer().analyze(changed_file) == []
+
+
 def test_only_changed_lines_can_create_dotnet_findings():
     changed_file = source_file(
         "class X {\n public string Token() { using var md5 = MD5.Create(); return \"x\"; }\n}",
@@ -509,5 +587,3 @@ def test_deduplication_prints_detailed_rejection_output(capsys):
     assert "Reason: Duplicate of finding at tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
     assert "Equivalent to: tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
     assert len(processed) == 1
-
-

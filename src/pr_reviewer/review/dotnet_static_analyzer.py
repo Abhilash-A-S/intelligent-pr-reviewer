@@ -490,23 +490,17 @@ class DotNetStaticAnalyzer:
             add(number, Severity.LOW, "insufficient-test-assertion",
                 "The administrative endpoint test does not verify its authorization policy.",
                 "Assert unauthorized and forbidden outcomes for unauthenticated and unprivileged callers.")
-        # High-confidence C# test capability for xUnit, NUnit, MSTest, FluentAssertions
-        is_existence_assertion = bool(re.search(
-            r"\b(?:Assert\.NotNull|Assert\.IsNotNull|Assert\.True\s*\([^;]*!=\s*null|Should\(\)\.NotBeNull)\b",
-            line,
-            re.IGNORECASE,
-        ))
+        # High-confidence C# test capability for xUnit, NUnit, MSTest, FluentAssertions.
+        # Existence checks are intentionally not treated as meaningful behavioural
+        # verification when an API call is the subject under test.
+        is_existence_assertion = cls._is_existence_assertion(line)
         if is_existence_assertion:
             executes_api = bool(re.search(
-                r"\b(?:controller\.\w+|client\.(?:Get|Post|Put|Delete|Send|Patch)\w*Async|client\.GetStringAsync|httpClient\.\w+)\b",
+                r"\b(?:client|controller|[A-Za-z_]\w*(?:client|controller))\.\w+\s*\(",
                 method,
                 re.IGNORECASE,
             ))
-            meaningful_verifications = bool(re.search(
-                r"\b(?:Assert\.Equal|Assert\.Same|Assert\.Equivalent|Assert\.Contains|Assert\.Throws|Assert\.ThrowsAsync|Should\(\)\.Be|Should\(\)\.BeEquivalentTo|StatusCode|IsSuccessStatusCode|OkObjectResult|BadRequestResult|UnauthorizedResult|NotFoundResult|Content|Value|Items)\b",
-                method,
-                re.IGNORECASE,
-            ))
+            meaningful_verifications = cls._has_meaningful_test_verification(method)
             sig = cls._method_signature(lines, number)
             is_smoke_test = bool(re.search(
                 r"\b(?:smoke|constructor|createinstance|factory|instantiate)\b",
@@ -521,3 +515,37 @@ class DotNetStaticAnalyzer:
                     "The test executes an HTTP/API operation but only asserts object existence (NotNull), failing to verify response status, payload content, or security policy.",
                     "Assert specific response status codes, returned body fields, or security outcome behavior.",
                 )
+
+    @staticmethod
+    def _is_existence_assertion(text: str) -> bool:
+        return bool(re.search(
+            r"(?:\bAssert\.(?:NotNull|IsNotNull)\s*\(|"
+            r"\bAssert\.That\s*\([^;]*,\s*Is\.Not\.Null\b|"
+            r"\.Should\(\)\.NotBeNull\s*\(|"
+            r"\bAssert\.(?:True|IsTrue)\s*\([^;]*(?:!=\s*null|is\s+not\s+null))",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        ))
+
+    @classmethod
+    def _has_meaningful_test_verification(cls, method: str) -> bool:
+        verification = re.compile(
+            r"(?:\bAssert\.(?:Equal|NotEqual|AreEqual|AreNotEqual|Same|NotSame|"
+            r"Equivalent|Contains|DoesNotContain|True|False|IsTrue|IsFalse|"
+            r"Empty|NotEmpty|Single|Collection|All|Throws|ThrowsAsync|"
+            r"ThrowsException|ThrowsExceptionAsync|IsType|IsAssignableFrom|"
+            r"Matches|InRange)\b|"
+            r"\bAssert\.That\s*\([^;]*,\s*(?:Is|Does|Has)\.|"
+            r"\.Should\(\)\.(?:Be|NotBe|BeEquivalentTo|Contain|NotContain|"
+            r"Match|Throw|NotThrow|HaveCount|BeEmpty|NotBeEmpty)\w*\s*\(|"
+            r"\bEnsureSuccessStatusCode\s*\(|"
+            r"\b[A-Za-z_]\w*\.Verify\w*\s*\()",
+            re.IGNORECASE | re.DOTALL,
+        )
+        statements = re.findall(r"[^;]+;", method, re.DOTALL)
+        for statement in statements:
+            if cls._is_existence_assertion(statement):
+                continue
+            if verification.search(statement):
+                return True
+        return False
