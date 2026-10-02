@@ -158,6 +158,11 @@ def main() -> None:
     publish = args.publish
     dry_run = not publish
 
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
     # --------------------------------------------------
     # Validate: must have either --pull-number or --select-pr
     # --------------------------------------------------

@@ -562,7 +562,9 @@ class AdaptiveSemanticRouter:
         return False
 
     _CSHARP_CONFIG_SECURITY_PATTERN = re.compile(
-        r"(?:password\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|secret\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|credential|token|api[_-]?key|access[_-]?key|"
+        r"(?:password\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|secret\s*[:=]\s*['\"]?[\w!@#$%^&*]{3,}|credential|"
+        r"api[_-]?key|access[_-]?key|private[_-]?key|token[_-]?secret|auth[_-]?token|bearer[_-]?token|"
+        r"token\s*[:=]\s*['\"][^'\"]{8,}|"
         r"cors|allowed[_-]?origins|csrf|ssl|tls|"
         r"connectionstrings|jwtsecret|signingkey)",
         re.IGNORECASE,
@@ -610,14 +612,22 @@ class AdaptiveSemanticRouter:
         if not content.strip():
             return False
 
+        path_lower = changed_file.file_path.lower().replace("\\", "/")
+        is_test = "/tests/" in f"/{path_lower}" or path_lower.endswith(("test.cs", "tests.cs"))
+
         lines_list = content.splitlines()
         method_ranges: list[tuple[int, int]] = []
         for idx, line in enumerate(lines_list, start=1):
+            stripped = line.strip()
+            if stripped.startswith(("throw ", "return ", "new ", "using ", "var ", "if ", "else ", "for ", "foreach ", "while ", "catch ", "//", "/*", "*")):
+                continue
+            if not re.search(r"^\s*(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|static|async|virtual|override|abstract|sealed|partial)\b", line):
+                continue
             if not re.search(r"\b(?:public|private|protected|internal)\b", line) or "(" not in line:
                 continue
-            if re.search(r"\b(?:class|record|struct|interface|delegate)\b", line):
+            if re.search(r"\b(?:class|record|struct|interface|delegate|enum)\b", line):
                 continue
-            
+
             # Include preceding attribute lines (e.g. [HttpGet("...")] or [HttpPost])
             method_start = idx
             for k in range(idx - 2, max(-1, idx - 6), -1):
@@ -641,9 +651,22 @@ class AdaptiveSemanticRouter:
                 elif "=>" in cur_line and ";" in cur_line:
                     end = j + 1
                     break
+
+            # In test files, ignore constructors (e.g. TestClass(Fixture f)) - only check test methods or methods with assertions
+            if is_test:
+                method_header = " ".join(lines_list[max(0, method_start - 1):idx])
+                is_test_method = bool(re.search(r"\[(?:Fact|Theory|Test|TestCase|TestMethod)\]", method_header, re.I))
+                if not is_test_method:
+                    method_body = "\n".join(lines_list[idx - 1:end])
+                    if not re.search(r"\bAssert\b|\bShould\(\)", method_body):
+                        continue
+
             method_ranges.append((method_start, end))
 
+        # Handle top-level statement files (e.g. Program.cs)
         if not method_ranges:
+            if re.search(r"\b(?:WebApplication\.CreateBuilder|Host\.CreateDefaultBuilder)\b", content):
+                return bool(covered_lines)
             return False
 
         for start, end in method_ranges:

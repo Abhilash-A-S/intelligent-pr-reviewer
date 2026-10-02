@@ -34,6 +34,7 @@ class DotNetStaticAnalyzer:
             "path-traversal",
             "command-injection",
             "cors-misconfiguration",
+            "sequential-io-operations",
         }
         path = changed_file.file_path.replace("\\", "/").lower()
         is_test = "/tests/" in f"/{path}" or path.endswith(("test.cs", "tests.cs"))
@@ -155,6 +156,51 @@ class DotNetStaticAnalyzer:
                 add(number, Severity.MEDIUM, "httpclient-lifetime",
                     "A new HttpClient is created for each operation.",
                     "Inject a reusable HttpClient from IHttpClientFactory.")
+
+            # Outbound HTTP sequential I/O check
+            if not is_test:
+                http_awaits = re.findall(
+                    r"\bawait\s+\w+\.(?:GetAsync|GetStringAsync|PostAsync|PutAsync|DeleteAsync|SendAsync|GetByteArrayAsync|GetStreamAsync)\s*\(",
+                    method,
+                )
+                if len(http_awaits) >= 2 and "Task.WhenAll" not in method:
+                    if re.search(r"\bawait\s+\w+\.(?:GetAsync|GetStringAsync|PostAsync|PutAsync|DeleteAsync|SendAsync|GetByteArrayAsync|GetStreamAsync)\s*\(", line):
+                        add(
+                            number,
+                            Severity.MEDIUM,
+                            "sequential-io-operations",
+                            "Independent outbound HTTP requests are executed sequentially.",
+                            "Execute independent asynchronous network operations concurrently with Task.WhenAll.",
+                        )
+
+            # Outbound HTTP cancellation propagation check (applies to client/service methods, not tests or controller endpoints)
+            if not is_test and not re.search(r"\[From(?:Query|Header|Body|Route)", signature):
+                http_call = re.search(r"\b\w+\.(?:GetAsync|GetStringAsync|PostAsync|PutAsync|DeleteAsync|SendAsync|GetByteArrayAsync|GetStreamAsync)\s*\(", line)
+                if http_call:
+                    call_args = self._extract_call_arguments(lines, number - 1, http_call.end() - 1)
+                    start = self._method_start(lines, number)
+                    method_key = start if start is not None else number
+                    if (method_key, "outbound-cancellation") not in seen_methods:
+                        if "CancellationToken" not in signature:
+                            seen_methods.add((method_key, "outbound-cancellation"))
+                            add(
+                                number,
+                                Severity.MEDIUM,
+                                "missing-cancellation-propagation",
+                                "Outbound HTTP operation does not accept or propagate a CancellationToken.",
+                                "Accept a CancellationToken in the method signature and forward it to outbound HTTP calls.",
+                            )
+                        else:
+                            param = self._cancellation_parameter(signature)
+                            if param and not self._has_cancellation_token_argument(call_args, param):
+                                seen_methods.add((method_key, "outbound-cancellation"))
+                                add(
+                                    number,
+                                    Severity.MEDIUM,
+                                    "missing-cancellation-propagation",
+                                    "Outbound HTTP call ignores the cancellation token supplied in the method signature.",
+                                    "Forward the CancellationToken parameter to the outbound HTTP call.",
+                                )
 
             response = re.search(r"\bvar\s+(\w+)\s*=\s*await\s+\w+\.GetAsync\s*\(", line)
             if response and not re.search(r"\busing\b", line) and not self._disposed_later(method, response.group(1)):
@@ -416,8 +462,13 @@ class DotNetStaticAnalyzer:
     def _method_start(lines: list[str], number: int) -> int | None:
         for index in range(number - 1, max(-1, number - 40), -1):
             line = lines[index]
+            stripped = line.strip()
+            if stripped.startswith(("throw ", "return ", "new ", "using ", "var ", "if ", "else ", "for ", "foreach ", "while ", "catch ", "//", "/*", "*")):
+                continue
+            if not re.search(r"^\s*(?:\[[^\]]+\]\s*)*(?:public|private|protected|internal|static|async|virtual|override|abstract|sealed|partial)\b", line):
+                continue
             if re.search(r"\b(?:public|private|protected|internal)\b", line) and "(" in line:
-                if not re.search(r"\b(?:class|record|struct|interface)\b", line):
+                if not re.search(r"\b(?:class|record|struct|interface|delegate|enum)\b", line):
                     return index
         return None
 
@@ -428,8 +479,99 @@ class DotNetStaticAnalyzer:
 
     @staticmethod
     def _cancellation_parameter(signature: str) -> str | None:
-        match = re.search(r"CancellationToken\s+(\w+)", signature)
+        match = re.search(r"CancellationToken(?:\s*\?)?\s+(\w+)", signature)
         return match.group(1) if match else None
+
+    @staticmethod
+    def _extract_call_arguments(lines: list[str], line_idx: int, open_paren_idx: int) -> str:
+        """Extract full argument text starting after open_paren_idx using balanced delimiter parsing."""
+        cur_line = line_idx
+        cur_char = open_paren_idx + 1
+        depth = 1
+        chars: list[str] = []
+
+        in_string = False
+        in_verbatim = False
+        in_char = False
+
+        while cur_line < len(lines):
+            line = lines[cur_line]
+            while cur_char < len(line):
+                ch = line[cur_char]
+
+                if in_string:
+                    chars.append(ch)
+                    if in_verbatim:
+                        if ch == '"':
+                            if cur_char + 1 < len(line) and line[cur_char + 1] == '"':
+                                chars.append('"')
+                                cur_char += 1
+                            else:
+                                in_string = False
+                                in_verbatim = False
+                    else:
+                        if ch == '\\':
+                            if cur_char + 1 < len(line):
+                                chars.append(line[cur_char + 1])
+                                cur_char += 1
+                        elif ch == '"':
+                            in_string = False
+                elif in_char:
+                    chars.append(ch)
+                    if ch == '\\':
+                        if cur_char + 1 < len(line):
+                            chars.append(line[cur_char + 1])
+                            cur_char += 1
+                    elif ch == "'":
+                        in_char = False
+                else:
+                    if ch == '@' and cur_char + 1 < len(line) and line[cur_char + 1] == '"':
+                        in_string = True
+                        in_verbatim = True
+                        chars.append('@"')
+                        cur_char += 1
+                    elif ch == '$' and cur_char + 2 < len(line) and line[cur_char + 1:cur_char + 3] in ('@"', '"{'):
+                        if line[cur_char + 1] == '@':
+                            in_string = True
+                            in_verbatim = True
+                            chars.append('$@"')
+                            cur_char += 2
+                        else:
+                            in_string = True
+                            chars.append('$"')
+                            cur_char += 1
+                    elif ch == '"':
+                        in_string = True
+                        chars.append(ch)
+                    elif ch == "'":
+                        in_char = True
+                        chars.append(ch)
+                    elif ch in '([{':
+                        depth += 1
+                        chars.append(ch)
+                    elif ch in ')]}':
+                        depth -= 1
+                        if depth == 0:
+                            return "".join(chars)
+                        chars.append(ch)
+                    else:
+                        chars.append(ch)
+                cur_char += 1
+
+            chars.append("\n")
+            cur_line += 1
+            cur_char = 0
+
+        return "".join(chars)
+
+    @staticmethod
+    def _has_cancellation_token_argument(args_str: str, param: str | None) -> bool:
+        """Check whether the call arguments pass the expected cancellation token."""
+        if not args_str.strip():
+            return False
+        if param and re.search(rf"\b{re.escape(param)}\b", args_str):
+            return True
+        return False
 
     @staticmethod
     def _has_task_failure_observer(method: str) -> bool:

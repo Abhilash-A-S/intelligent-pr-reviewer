@@ -587,3 +587,169 @@ def test_deduplication_prints_detailed_rejection_output(capsys):
     assert "Reason: Duplicate of finding at tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
     assert "Equivalent to: tests/ReviewFixture.Api.Tests/UnsafeApiTests.cs:4 [insufficient-test-assertion]" in captured
     assert len(processed) == 1
+
+
+def test_unsafe_profile_client_sequential_io_and_cancellation_propagation():
+    unsafe_client = """
+        public class UnsafeProfileClient(HttpClient client) {
+            public async Task<UserProfile> GetProfileAsync(long userId) {
+                var details = await client.GetAsync($"/users/{userId}");
+                var preferences = await client.GetAsync($"/preferences/{userId}");
+                var activity = await client.GetAsync($"/activity/{userId}");
+                return new UserProfile(details, preferences, activity);
+            }
+        }
+    """
+    found = rules(unsafe_client, "src/Clients/UnsafeProfileClient.cs")
+    assert "sequential-io-operations" in found
+    assert "missing-cancellation-propagation" in found
+
+    safe_client = """
+        public class SafeProfileClient(HttpClient client) {
+            public async Task<UserProfile> GetProfileAsync(long userId, CancellationToken cancellationToken) {
+                var detailsTask = client.GetAsync($"/users/{userId}", cancellationToken);
+                var prefTask = client.GetAsync($"/preferences/{userId}", cancellationToken);
+                await Task.WhenAll(detailsTask, prefTask);
+                return new UserProfile(await detailsTask, await prefTask);
+            }
+        }
+    """
+    safe_found = rules(safe_client, "src/Clients/SafeProfileClient.cs")
+    assert "sequential-io-operations" not in safe_found
+    assert "missing-cancellation-propagation" not in safe_found
+
+
+def test_nested_and_multiline_cancellation_propagation_safe():
+    safe_profile = """
+        public sealed class SafeProfileClient(HttpClient httpClient)
+        {
+            private static readonly Uri ProfileBaseUri = new("https://profiles.example/");
+
+            public async Task<string> DownloadUserAsync(string userId, CancellationToken cancellationToken)
+            {
+                using var response = await httpClient.GetAsync(
+                    new Uri(ProfileBaseUri, $"users/{userId}"),
+                    cancellationToken);
+                return await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+
+            public async Task<(string Users, string Roles)> LoadDashboardAsync(
+                CancellationToken cancellationToken)
+            {
+                var usersTask = httpClient.GetStringAsync(new Uri(ProfileBaseUri, "users"), cancellationToken);
+                var rolesTask = httpClient.GetStringAsync(new Uri(ProfileBaseUri, "roles"), cancellationToken);
+                await Task.WhenAll(usersTask, rolesTask);
+                return (await usersTask, await rolesTask);
+            }
+
+            public async Task<string> NamedTokenAsync(Uri uri, CancellationToken ct)
+            {
+                return await httpClient.GetStringAsync(uri, cancellationToken: ct);
+            }
+        }
+    """
+    found = rules(safe_profile, "src/ReviewFixture.Api/Integrations/SafeProfileClient.cs")
+    assert "missing-cancellation-propagation" not in found
+    assert "sequential-io-operations" not in found
+    assert len(found) == 0
+
+
+def test_unsafe_profile_client_deduplicated_method_findings():
+    unsafe_profile = """
+        public sealed class UnsafeProfileClient(HttpClient httpClient)
+        {
+            public Task<string> DownloadAsync(string url) => httpClient.GetStringAsync(url);
+
+            public async Task<(string Users, string Roles, string Permissions)> LoadDashboardAsync()
+            {
+                var users = await httpClient.GetStringAsync("https://profiles.example/users");
+                var roles = await httpClient.GetStringAsync("https://profiles.example/roles");
+                var permissions = await httpClient.GetStringAsync("https://profiles.example/permissions");
+                return (users, roles, permissions);
+            }
+        }
+    """
+    file = source_file(unsafe_profile, "src/ReviewFixture.Api/Integrations/UnsafeProfileClient.cs")
+    findings = DotNetStaticAnalyzer().analyze(file)
+
+    rule_counts = {}
+    for f in findings:
+        rule_counts[f.rule_id] = rule_counts.get(f.rule_id, 0) + 1
+
+    assert rule_counts.get("sequential-io-operations") == 1
+    assert rule_counts.get("missing-cancellation-propagation") == 2
+    assert rule_counts.get("ssrf") == 1
+    assert len(findings) == 4
+
+
+def test_changed_line_ownership_does_not_report_unchanged_lines():
+    code = """
+        public class UnsafeService(HttpClient httpClient)
+        {
+            public async Task<string> UnchangedMethod()
+            {
+                var u = await httpClient.GetStringAsync("https://api/1");
+                var r = await httpClient.GetStringAsync("https://api/2");
+                return u + r;
+            }
+
+            public async Task<string> ChangedMethod()
+            {
+                var a = await httpClient.GetStringAsync("https://api/a");
+                var b = await httpClient.GetStringAsync("https://api/b");
+                return a + b;
+            }
+        }
+    """
+    # Only lines in ChangedMethod are changed (lines 12-17)
+    file = source_file(code, "src/Services/UnsafeService.cs", changed_numbers={12, 13, 14, 15, 16, 17})
+    findings = DotNetStaticAnalyzer().analyze(file)
+    for f in findings:
+        assert 12 <= f.line_number <= 17
+
+
+def test_semantic_router_gates_covered_csharp_bootstrap_and_tests():
+    router = AdaptiveSemanticRouter()
+
+    # Program.cs top-level statements
+    program_code = """
+        var builder = WebApplication.CreateBuilder(args);
+        builder.Services.AddCors(options => {
+            options.AddPolicy("unsafe", p => p.SetIsOriginAllowed(_ => true).AllowCredentials());
+        });
+        var app = builder.Build();
+        app.Run();
+        public partial class Program {}
+    """
+    program_file = source_file(program_code, "src/Api/Program.cs")
+    decision = router.decide(program_file, covered_lines={3}, depth=ReviewDepth.STANDARD)
+    assert not decision.eligible
+    assert "static findings" in decision.reason
+
+    # appsettings.json with TokenIssuer
+    appsettings_code = '{"Security": {"TokenIssuer": "review-fixture"}}'
+    appsettings_file = source_file(appsettings_code, "src/Api/appsettings.json")
+    decision = router.decide(appsettings_file, covered_lines=set(), depth=ReviewDepth.STANDARD)
+    assert not decision.eligible
+    assert "no security-relevant content" in decision.reason
+
+    # UnsafeApiTests.cs with constructor
+    tests_code = """
+        public sealed class UnsafeApiTests : IClassFixture<WebApplicationFactory<Program>>
+        {
+            private readonly HttpClient _client;
+            public UnsafeApiTests(WebApplicationFactory<Program> factory) {
+                _client = factory.CreateClient();
+            }
+            [Fact]
+            public async Task TestRedirect() {
+                var res = await _client.GetAsync("/redirect");
+                Assert.NotNull(res);
+            }
+        }
+    """
+    tests_file = source_file(tests_code, "tests/Api.Tests/UnsafeApiTests.cs")
+    decision = router.decide(tests_file, covered_lines={11}, depth=ReviewDepth.STANDARD)
+    assert not decision.eligible
+    assert "static findings" in decision.reason
+
