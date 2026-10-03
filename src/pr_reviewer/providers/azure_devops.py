@@ -13,8 +13,8 @@ Pass `--repository` as one of:
 Example:
     `my-org/my-project/my-repo`
 
-Or supply `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PROJECT`, and
-`AZURE_DEVOPS_REPO` environment variables and pass just the repo name.
+Or supply `AZURE_DEVOPS_ORG` and `AZURE_DEVOPS_PROJECT` environment
+variables and pass just the repository name.
 
 Pull-request number
 -------------------
@@ -29,11 +29,12 @@ import httpx
 from dotenv import load_dotenv
 
 from pr_reviewer.providers.base import PullRequestProvider
+from pr_reviewer.providers.models import PullRequestSummary
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 load_dotenv()
 
-_REVIEWER_TAG = "intelligent-pr-reviewer-summary"
+_SUMMARY_MARKER = "<!-- intelligent-pr-reviewer:summary -->"
 
 
 class AzureDevOpsProvider(PullRequestProvider):
@@ -42,12 +43,14 @@ class AzureDevOpsProvider(PullRequestProvider):
     API_VERSION = "7.1"
     supports_batch_inline_comments = False
     supports_pull_request_listing = True
+    provider_name = "azure-devops"
+    display_name = "Azure DevOps"
 
     def list_pull_requests(
         self,
         repository: str,
         state: str = "open",
-    ) -> list[dict]:
+    ) -> list[PullRequestSummary]:
         """List pull requests for the repository."""
         org, project, repo = self._parse_repository(repository)
         status = "active" if state == "open" else state
@@ -56,32 +59,46 @@ class AzureDevOpsProvider(PullRequestProvider):
             url, params=self._qs(searchCriteria_status=status, searchCriteria_includeLinks="false")
         )
         response.raise_for_status()
-        prs = []
+        prs: list[PullRequestSummary] = []
         for pr in response.json().get("value", []):
-            prs.append({
-                "number": pr.get("pullRequestId"),
-                "title": pr.get("title", ""),
-                "author": pr.get("createdBy", {}).get("displayName", "unknown"),
-                "base": pr.get("targetRefName", "").removeprefix("refs/heads/"),
-                "head": pr.get("sourceRefName", "").removeprefix("refs/heads/"),
-                "state": pr.get("status", ""),
-            })
+            prs.append(
+                PullRequestSummary(
+                    number=pr.get("pullRequestId", 0),
+                    title=pr.get("title", ""),
+                    author=pr.get("createdBy", {}).get(
+                        "displayName", "unknown"
+                    ),
+                    base_branch=pr.get("targetRefName", "").removeprefix(
+                        "refs/heads/"
+                    ),
+                    head_branch=pr.get("sourceRefName", "").removeprefix(
+                        "refs/heads/"
+                    ),
+                    state=pr.get("status", ""),
+                )
+            )
         return prs
 
     def __init__(
         self,
         organization: str | None = None,
         project: str | None = None,
+        pat: str | None = None,
+        client: httpx.Client | None = None,
     ) -> None:
-        pat = os.getenv("AZURE_DEVOPS_PAT")
+        self._org = organization or os.getenv("AZURE_DEVOPS_ORG", "")
+        self._project = project or os.getenv("AZURE_DEVOPS_PROJECT", "")
+
+        if client is not None:
+            self.client = client
+            return
+
+        pat = pat or os.getenv("AZURE_DEVOPS_PAT")
         if not pat:
             raise ValueError(
                 "AZURE_DEVOPS_PAT is not configured. "
                 "Please add it to your .env file."
             )
-
-        self._org = organization or os.getenv("AZURE_DEVOPS_ORG", "")
-        self._project = project or os.getenv("AZURE_DEVOPS_PROJECT", "")
 
         token = base64.b64encode(f":{pat}".encode()).decode()
         self.client = httpx.Client(
@@ -97,16 +114,20 @@ class AzureDevOpsProvider(PullRequestProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _parse_repository(repository: str) -> tuple[str, str, str]:
+    def _parse_repository(self, repository: str) -> tuple[str, str, str]:
         """Return (organization, project, repo_name) from a repository string."""
         parts = [p.strip() for p in repository.split("/") if p.strip()]
         if len(parts) == 3:
             return parts[0], parts[1], parts[2]
         if len(parts) == 1:
-            org = os.getenv("AZURE_DEVOPS_ORG", "")
-            project = os.getenv("AZURE_DEVOPS_PROJECT", "")
-            return org, project, parts[0]
+            if not self._org or not self._project:
+                raise ValueError(
+                    "Azure DevOps organization and project are required when "
+                    "--repository contains only a repository name. Configure "
+                    "AZURE_DEVOPS_ORG and AZURE_DEVOPS_PROJECT, or use "
+                    "org/project/repo."
+                )
+            return self._org, self._project, parts[0]
         raise ValueError(
             f"Azure DevOps repository must be 'org/project/repo' or "
             f"'repo' (with env vars). Got: {repository!r}"
@@ -132,7 +153,7 @@ class AzureDevOpsProvider(PullRequestProvider):
         response.raise_for_status()
         data = response.json()
         return PullRequest(
-            provider="azure_devops",
+            provider=self.provider_name,
             repository=repository,
             number=pull_number,
             title=data.get("title", ""),
@@ -260,7 +281,7 @@ class AzureDevOpsProvider(PullRequestProvider):
                 continue
             for comment in thread.get("comments", []):
                 content = comment.get("content", "")
-                if _REVIEWER_TAG in content:
+                if _SUMMARY_MARKER in content:
                     summary_threads.append(
                         {
                             "id": comment.get("id"),
@@ -273,18 +294,35 @@ class AzureDevOpsProvider(PullRequestProvider):
     def publish_summary_comment(self, repository: str, pull_number: int, body: str) -> dict:
         org, project, repo = self._parse_repository(repository)
         url = f"{self._base(org, project, repo)}/pullrequests/{pull_number}/threads"
-        tagged_body = f"{body}\n\n<!-- {_REVIEWER_TAG} -->"
         payload = {
-            "comments": [{"parentCommentId": 0, "content": tagged_body, "commentType": 1}],
+            "comments": [{"parentCommentId": 0, "content": body, "commentType": 1}],
             "status": 4,
         }
         response = self.client.post(url, params=self._qs(), json=payload)
         response.raise_for_status()
         return response.json()
 
-    def update_summary_comment(self, repository: str, comment_id: int, body: str) -> dict:
-        raise NotImplementedError(
-            "Azure DevOps summary comment update requires the thread ID. "
-            "Use the SummaryPublishingService which resolves the thread via "
-            "get_summary_comments and passes the correct IDs."
+    def update_summary_comment(
+        self,
+        repository: str,
+        comment_id: int,
+        body: str,
+        pull_number: int | None = None,
+        thread_id: int | None = None,
+    ) -> dict:
+        if pull_number is None or thread_id is None:
+            raise ValueError(
+                "Azure DevOps summary updates require pull_number and thread_id."
+            )
+        org, project, repo = self._parse_repository(repository)
+        url = (
+            f"{self._base(org, project, repo)}/pullrequests/{pull_number}"
+            f"/threads/{thread_id}/comments/{comment_id}"
         )
+        response = self.client.patch(
+            url,
+            params=self._qs(),
+            json={"content": body},
+        )
+        response.raise_for_status()
+        return response.json()

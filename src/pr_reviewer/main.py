@@ -2,7 +2,12 @@ import argparse
 import sys
 
 from pr_reviewer.llm.ollama import OllamaProvider
-from pr_reviewer.providers.github import GitHubProvider
+from pr_reviewer.providers.base import PullRequestProvider
+from pr_reviewer.providers.factory import (
+    PROVIDER_NAMES,
+    create_pull_request_provider,
+    provider_display_name,
+)
 from pr_reviewer.review.orchestrator import ReviewOrchestrator
 from pr_reviewer.review.semantic_routing import ReviewDepth
 
@@ -19,8 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--repository",
         required=True,
         help=(
-            "Repository in owner/name format. "
-            "Example: Abhilash-A-S/pr-review-testing"
+            "Provider-specific repository identifier. Use owner/name for "
+            "GitHub or organization/project/repository for Azure DevOps."
         ),
     )
 
@@ -37,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--provider",
-        choices=["github", "azure-devops"],
+        choices=PROVIDER_NAMES,
         default="github",
         help=(
             "Pull request platform provider. "
@@ -100,9 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _select_pull_request(provider, repository: str) -> int:
+def _select_pull_request(
+    provider: PullRequestProvider,
+    repository: str,
+) -> int:
     """List open PRs and interactively prompt the user to pick one."""
-    from pr_reviewer.providers.base import PullRequestProvider
     if not getattr(provider, "supports_pull_request_listing", False):
         raise ValueError(
             f"The provider '{type(provider).__name__}' does not support "
@@ -118,28 +125,26 @@ def _select_pull_request(provider, repository: str) -> int:
     print("-" * 55)
     for idx, pr in enumerate(prs, start=1):
         print(
-            f"  [{idx:2d}] PR #{pr['number']:4d}  {pr['title'][:60]}"
-            f"  ({pr['author']})"
+            f"  [{idx:2d}] PR #{pr.number:4d}  {pr.title[:60]}"
+            f"  ({pr.author})"
         )
     print()
     while True:
-        raw = input("Select a PR by number or list index: ").strip()
+        raw = input("Select a list index, or enter # followed by a PR ID: ").strip()
         if not raw:
             continue
-        # Accept both direct PR number and list index (e.g. "1", "#2")
-        raw = raw.lstrip("#")
+        direct_pr_id = raw.startswith("#")
+        raw = raw.removeprefix("#")
         try:
             value = int(raw)
         except ValueError:
             print("  Please enter a valid integer.")
             continue
-        # Treat small values as list indices if they fit
-        if 1 <= value <= len(prs):
-            return prs[value - 1]["number"]
-        # Otherwise treat as an absolute PR number
-        match = next((p for p in prs if p["number"] == value), None)
+        if not direct_pr_id and 1 <= value <= len(prs):
+            return prs[value - 1].number
+        match = next((p for p in prs if p.number == value), None)
         if match:
-            return match["number"]
+            return match.number
         print(f"  PR #{value} not found in the list above. Try again.")
 
 
@@ -157,6 +162,7 @@ def main() -> None:
 
     publish = args.publish
     dry_run = not publish
+    provider_label = provider_display_name(args.provider)
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -177,6 +183,8 @@ def main() -> None:
         f"Repository   : {args.repository}"
     )
 
+    print(f"Provider     : {provider_label}")
+
     if not args.select_pr:
         print(
             f"Pull Request : #{args.pull_number}"
@@ -192,22 +200,18 @@ def main() -> None:
         print()
         print(
             "🛡️ Dry-run mode: "
-            "no GitHub comments will be published."
+            "no pull request comments will be published."
         )
 
     else:
         print()
         print(
             "⚠️ Publish mode: "
-            "review comments will be written to GitHub."
+            f"review comments will be written to {provider_label}."
         )
 
     try:
-        if args.provider == "azure-devops":
-            from pr_reviewer.providers.azure_devops import AzureDevOpsProvider
-            provider = AzureDevOpsProvider()
-        else:
-            provider = GitHubProvider()
+        provider = create_pull_request_provider(args.provider)
 
         # --------------------------------------------------
         # Manual PR selection (--select-pr)
@@ -412,7 +416,7 @@ def main() -> None:
 
         print()
         print(
-            "🛡️ Nothing was written to GitHub."
+            f"🛡️ Nothing was written to {provider_label}."
         )
 
     else:

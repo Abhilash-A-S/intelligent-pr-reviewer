@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from pr_reviewer.providers.github import GitHubProvider
+from pr_reviewer.providers.models import PullRequestSummary
 
 
 @patch("pr_reviewer.providers.github.httpx.Client")
@@ -29,7 +30,7 @@ def test_get_pull_request(mock_client_class):
 
     mock_client.get.return_value = mock_response
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     pull_request = provider.get_pull_request(
         repository="example/repository",
@@ -44,6 +45,36 @@ def test_get_pull_request(mock_client_class):
     assert pull_request.base_branch == "main"
     assert pull_request.head_branch == "feature/auth"
     assert pull_request.head_commit == "abc123"
+
+
+@patch("pr_reviewer.providers.github.httpx.Client")
+def test_list_pull_requests_returns_provider_neutral_models(mock_client_class):
+    client = Mock()
+    mock_client_class.return_value = client
+    response = Mock()
+    response.json.return_value = [{
+        "number": 10,
+        "title": "Add authentication",
+        "user": {"login": "developer"},
+        "base": {"ref": "main"},
+        "head": {"ref": "feature/auth"},
+        "state": "open",
+    }]
+    client.get.return_value = response
+    provider = GitHubProvider(token="test-token")
+
+    result = provider.list_pull_requests("example/repository")
+
+    assert result == [
+        PullRequestSummary(
+            number=10,
+            title="Add authentication",
+            author="developer",
+            base_branch="main",
+            head_branch="feature/auth",
+            state="open",
+        )
+    ]
 
 
 @patch("pr_reviewer.providers.github.httpx.Client")
@@ -62,7 +93,7 @@ def test_get_changed_files(mock_client_class):
 
     mock_client.get.return_value = mock_response
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     files = provider.get_changed_files(
         repository="example/repository",
@@ -89,7 +120,7 @@ def test_get_repository_tree_returns_only_blob_paths(mock_client_class):
         ]
     }
     mock_client.get.return_value = mock_response
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
     result = provider.get_repository_tree("example/repository", "abc123")
     assert result == [
         "nx-angular-review/nx.json",
@@ -113,7 +144,7 @@ def test_get_changed_files_fetches_all_github_pages(mock_client_class):
     ]
     mock_client.get.side_effect = [first_page, second_page]
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
     files = provider.get_changed_files("example/repository", 10)
 
     assert len(files) == 135
@@ -134,7 +165,7 @@ def test_get_existing_comments_fetches_all_github_pages(mock_client_class):
     second_page.json.return_value = [{"id": 100}]
     mock_client.get.side_effect = [first_page, second_page]
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
     comments = provider.get_existing_comments("example/repository", 10)
 
     assert len(comments) == 101
@@ -157,7 +188,7 @@ def test_inline_comment_retries_422_with_verified_diff_position(mock_client_clas
     legacy = Mock()
     legacy.json.return_value = {"id": 42}
     client.post.side_effect = [modern, legacy]
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     result = provider.publish_inline_comment(
         repository="example/repository",
@@ -193,7 +224,7 @@ def test_inline_comment_does_not_retry_secondary_throttle(mock_client_class, mon
         "unprocessable", request=Mock(), response=response,
     )
     client.post.return_value = failed
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     with pytest.raises(httpx.HTTPStatusError):
         provider.publish_inline_comment(
@@ -213,7 +244,7 @@ def test_github_batch_review_uses_single_request(mock_client_class, monkeypatch)
     response = Mock()
     response.json.return_value = {"id": 77}
     client.post.return_value = response
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     result = provider.publish_inline_comments_batch(
         repository="example/repository", pull_number=1, commit_id="abc",

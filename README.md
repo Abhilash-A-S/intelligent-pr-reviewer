@@ -20,6 +20,58 @@ Key boundaries:
 
 See `ARCHITECTURE_PLAN_UNIVERSAL_REVIEW_ENGINE.md` for the staged design.
 
+## Pull-request providers
+
+The review engine, finding pipeline, language capabilities, and publishing
+services depend only on `PullRequestProvider`. Platform-specific API behavior
+is isolated in adapters selected by one provider factory.
+
+Supported provider names:
+
+- `github` (default)
+- `azure-devops`
+
+The provider-neutral `PullRequestSummary` model is used by CLI selection now
+and can be reused by the planned web UI without exposing GitHub or Azure API
+response shapes.
+
+Copy `.env.example` to `.env` and configure only the provider you use. Never
+commit `.env` or real access tokens.
+
+### GitHub
+
+```bash
+uv run intelligent-pr-reviewer \
+  --provider github \
+  --repository owner/repository \
+  --pull-number 1 \
+  --dry-run
+```
+
+`--provider github` may be omitted because GitHub remains the compatibility
+default.
+
+### Interactive PR selection
+
+```bash
+uv run intelligent-pr-reviewer \
+  --provider github \
+  --repository owner/repository \
+  --select-pr \
+  --dry-run
+```
+
+Enter a displayed list index, or prefix an absolute PR ID with `#`.
+
+### Azure DevOps foundation status
+
+The Azure adapter currently has provider authentication, PR metadata/listing,
+file-content access, inline-thread publishing, duplicate lookup, and
+create/update summary support behind the common interface. Azure changed-line
+diff reconstruction, large-PR pagination, repository-tree discovery, and live
+end-to-end certification are intentionally the next isolated release step.
+Until that step is complete, do not treat an Azure run as production-certified.
+
 ## Local large-PR performance
 
 Ollama supports ownership-safe batching for compatible files. Batches may

@@ -34,7 +34,7 @@ def test_get_file_content(
         response
     )
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     result = provider.get_file_content(
         repository="example/repository",
@@ -73,7 +73,7 @@ def test_get_file_content_returns_empty_when_missing(
         response
     )
 
-    provider = GitHubProvider()
+    provider = GitHubProvider(token="test-token")
 
     result = provider.get_file_content(
         repository="example/repository",

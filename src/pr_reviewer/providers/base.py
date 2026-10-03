@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from pr_reviewer.providers.models import PullRequestSummary
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 
@@ -16,12 +17,14 @@ class PullRequestProvider(ABC):
 
     supports_batch_inline_comments = False
     supports_pull_request_listing = False
+    provider_name = "unknown"
+    display_name = "Pull Request provider"
 
     def list_pull_requests(
         self,
         repository: str,
         state: str = "open",
-    ) -> list[dict]:
+    ) -> list[PullRequestSummary]:
         """Return a list of pull requests with id, number, title, and author.
 
         Providers that support listing should override this method and set
@@ -146,6 +149,8 @@ class PullRequestProvider(ABC):
         repository: str,
         comment_id: int,
         body: str,
+        pull_number: int | None = None,
+        thread_id: int | None = None,
     ) -> dict:
         """
         Update an existing Intelligent PR Reviewer summary.

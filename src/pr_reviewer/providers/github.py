@@ -5,6 +5,7 @@ import httpx
 from dotenv import load_dotenv
 
 from pr_reviewer.providers.base import PullRequestProvider
+from pr_reviewer.providers.models import PullRequestSummary
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 load_dotenv()
@@ -14,14 +15,16 @@ class GitHubProvider(PullRequestProvider):
     BASE_URL = "https://api.github.com"
     supports_batch_inline_comments = True
     supports_pull_request_listing = True
+    provider_name = "github"
+    display_name = "GitHub"
 
     def list_pull_requests(
         self,
         repository: str,
         state: str = "open",
-    ) -> list[dict]:
+    ) -> list[PullRequestSummary]:
         """List pull requests for the repository."""
-        prs: list[dict] = []
+        prs: list[PullRequestSummary] = []
         page = 1
         while True:
             response = self.client.get(
@@ -33,21 +36,31 @@ class GitHubProvider(PullRequestProvider):
             if not batch:
                 break
             for pr in batch:
-                prs.append({
-                    "number": pr["number"],
-                    "title": pr["title"],
-                    "author": pr["user"]["login"],
-                    "base": pr["base"]["ref"],
-                    "head": pr["head"]["ref"],
-                    "state": pr["state"],
-                })
+                prs.append(
+                    PullRequestSummary(
+                        number=pr["number"],
+                        title=pr["title"],
+                        author=pr["user"]["login"],
+                        base_branch=pr["base"]["ref"],
+                        head_branch=pr["head"]["ref"],
+                        state=pr["state"],
+                    )
+                )
             if len(batch) < 30:
                 break
             page += 1
         return prs
 
-    def __init__(self):
-        token = os.getenv("GITHUB_TOKEN")
+    def __init__(
+        self,
+        token: str | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        if client is not None:
+            self.client = client
+            return
+
+        token = token or os.getenv("GITHUB_TOKEN")
 
         if not token:
             raise ValueError(
@@ -345,13 +358,25 @@ class GitHubProvider(PullRequestProvider):
         the issue comments API.
         """
 
-        response = self.client.get(
-            f"/repos/{repository}/issues/{pull_number}/comments"
-        )
-
-        response.raise_for_status()
-
-        return response.json()
+        comments: list[dict] = []
+        page = 1
+        per_page = 100
+        while True:
+            response = self.client.get(
+                f"/repos/{repository}/issues/{pull_number}/comments",
+                params={"per_page": per_page, "page": page},
+            )
+            response.raise_for_status()
+            batch = response.json()
+            if not isinstance(batch, list):
+                raise ValueError(
+                    "GitHub pull-request summary comments response was not a list."
+                )
+            comments.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return comments
 
     def publish_summary_comment(
         self,
@@ -375,6 +400,8 @@ class GitHubProvider(PullRequestProvider):
         repository: str,
         comment_id: int,
         body: str,
+        pull_number: int | None = None,
+        thread_id: int | None = None,
     ) -> dict:
         response = self.client.patch(
             f"/repos/{repository}/issues/comments/{comment_id}",

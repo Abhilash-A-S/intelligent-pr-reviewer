@@ -101,6 +101,10 @@ def test_updates_existing_summary():
 
     assert call.kwargs["comment_id"] == 200
 
+    assert call.kwargs["pull_number"] == 10
+
+    assert call.kwargs["thread_id"] is None
+
     assert "New summary" in call.kwargs["body"]
 
 

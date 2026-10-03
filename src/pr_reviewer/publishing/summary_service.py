@@ -52,6 +52,8 @@ class SummaryPublishingService:
                     repository=repository,
                     comment_id=existing_summary["id"],
                     body=body,
+                    pull_number=pull_number,
+                    thread_id=existing_summary.get("thread_id"),
                 )
             )
 
