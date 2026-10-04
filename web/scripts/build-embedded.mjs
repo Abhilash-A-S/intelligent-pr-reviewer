@@ -1,6 +1,6 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -50,6 +50,13 @@ function collectReferencedAssets(browserOutput) {
   return [...assets];
 }
 
+function collectFiles(directory) {
+  return readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(directory, join(entry.parentPath, entry.name)).replaceAll('\\', '/'))
+    .sort();
+}
+
 try {
   const build = spawnSync(
     angularExecutable,
@@ -71,7 +78,16 @@ try {
     mkdirSync(dirname(target), { recursive: true });
     cpSync(join(browserOutput, relativePath), target);
   }
-  console.log(`Embedded ${assets.length} UI assets in ${destination}`);
+  const expectedAssets = [...assets].sort();
+  const embeddedAssets = collectFiles(destination);
+  if (JSON.stringify(embeddedAssets) !== JSON.stringify(expectedAssets)) {
+    const unexpected = embeddedAssets.filter((asset) => !expectedAssets.includes(asset));
+    const missing = expectedAssets.filter((asset) => !embeddedAssets.includes(asset));
+    throw new Error(
+      `Embedded asset verification failed. Unexpected: ${unexpected.join(', ') || 'none'}; missing: ${missing.join(', ') || 'none'}`,
+    );
+  }
+  console.log(`Embedded and verified ${assets.length} UI assets in ${destination}`);
 } finally {
   rmSync(temporaryOutput, { recursive: true, force: true });
 }

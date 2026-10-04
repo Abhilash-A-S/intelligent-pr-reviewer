@@ -1,12 +1,6 @@
 <section class="page dashboard-page">
   <header class="page-heading heading-with-action">
-    <div>
-      <h1>Pull Requests</h1>
-      <p>Select a pull request to review</p>
-    </div>
-    @if (workspace.previewData()) {
-      <span class="preview-badge"><app-icon name="sparkles" /> Preview data</span>
-    }
+    <div><h1>Pull Requests</h1><p>Select a pull request to review</p></div>
   </header>
 
   <section class="card repository-filter" aria-labelledby="repository-filter-title">
@@ -172,7 +166,7 @@
               <td><span class="author"><span class="mini-avatar">{{ initials(pullRequest.author) }}</span>{{ pullRequest.author }}</span></td>
               <td><span class="branch"><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span></td>
               <td>{{ pullRequest.changed_files ?? '—' }}</td>
-              <td>{{ pullRequest.updated_at ?? 'Just now' }}</td>
+              <td>{{ relativeTime(pullRequest.updated_at) }}</td>
               <td>
                 <span class="status-pill" [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')">
                   <span></span>{{ statusLabel(pullRequest) }}
@@ -193,7 +187,20 @@
           } @empty {
             <tr>
               <td colspan="8">
-                <div class="empty-state"><app-icon name="git-pull-request" /><strong>No matching pull requests</strong><span>Adjust the search or load another repository.</span></div>
+                <div class="empty-state">
+                  <app-icon name="git-pull-request" />
+                  @if (workspace.loading()) {
+                    <strong>Loading pull requests…</strong><span>Contacting the selected provider.</span>
+                  } @else if (!workspace.hasRepositorySelection()) {
+                    <strong>Select a repository</strong><span>Enter the provider repository details above, then refresh.</span>
+                  } @else if (!workspace.loaded()) {
+                    <strong>Repository ready</strong><span>Refresh to load its open pull requests.</span>
+                  } @else if (search() || statusFilter() !== 'all') {
+                    <strong>No matching pull requests</strong><span>Adjust the search or status filter.</span>
+                  } @else {
+                    <strong>No open pull requests</strong><span>The selected provider returned an empty list.</span>
+                  }
+                </div>
               </td>
             </tr>
           }
@@ -203,12 +210,7 @@
 
     <footer class="table-footer">
       <span>Showing {{ filteredPullRequests().length }} of {{ workspace.pullRequests().length }} pull requests</span>
-      <div class="pagination">
-        <button type="button" disabled aria-label="Previous page"><app-icon name="chevron-left" /></button>
-        <button type="button" class="active">1</button>
-        <button type="button">2</button>
-        <button type="button" aria-label="Next page"><app-icon name="chevron-right" /></button>
-      </div>
+      @if (workspace.pullRequests().length) { <span class="live-data-label">Live provider data</span> }
     </footer>
   </section>
 </section>

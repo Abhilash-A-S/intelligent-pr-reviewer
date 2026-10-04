@@ -18,6 +18,13 @@ export interface HealthResponse {
     ready: boolean | null;
     model: string;
     base_url: string;
+    read_timeout_seconds: number;
+  };
+  review_policy: {
+    max_inline_comments: number;
+    confirmation_before_publish: boolean;
+    duplicate_prevention: boolean;
+    summary_comment: boolean;
   };
 }
 
@@ -45,6 +52,7 @@ export interface PullRequestDetail extends PullRequestSummary {
   repository: string;
   head_commit: string;
   description?: string;
+  commit_count?: number | null;
 }
 
 export interface ChangedFileSummary {

@@ -3,7 +3,6 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 
 import { ReviewerApi } from '../../core/api.service';
-import { DEMO_FILES, DEMO_PULL_REQUEST } from '../../core/demo-data';
 import {
   ChangedFileSummary,
   ProviderId,
@@ -27,12 +26,11 @@ export class PullRequestPage {
   private readonly preferences = inject(ReviewPreferencesService);
 
   readonly provider = signal<ProviderId>('azure-devops');
-  readonly repository = signal(DEMO_PULL_REQUEST.repository);
-  readonly pullRequest = signal<PullRequestDetail>(DEMO_PULL_REQUEST);
-  readonly files = signal<ChangedFileSummary[]>(DEMO_FILES);
-  readonly loading = signal(false);
+  readonly repository = signal('');
+  readonly pullRequest = signal<PullRequestDetail | null>(null);
+  readonly files = signal<ChangedFileSummary[]>([]);
+  readonly loading = signal(true);
   readonly error = signal<string | null>(null);
-  readonly previewData = signal(true);
   readonly activeTab = signal<'overview' | 'files' | 'commits'>('overview');
   readonly depth = signal<ReviewDepth>(this.preferences.defaultDepth());
   readonly publishConfirmationOpen = signal(false);
@@ -51,10 +49,12 @@ export class PullRequestPage {
     const repository = this.route.snapshot.queryParamMap.get('repository');
     if (provider === 'github' || provider === 'azure-devops') this.provider.set(provider);
     if (repository) this.repository.set(repository);
-    if (Number.isFinite(pullNumber) && pullNumber > 0) {
-      this.pullRequest.update((item) => ({ ...item, number: pullNumber }));
-      this.load(pullNumber);
+    if (!Number.isFinite(pullNumber) || pullNumber <= 0 || !repository) {
+      this.loading.set(false);
+      this.error.set('Open a pull request from the dashboard so its provider and repository are known.');
+      return;
     }
+    this.load(pullNumber);
   }
 
   load(pullNumber: number): void {
@@ -67,14 +67,13 @@ export class PullRequestPage {
       next: ({ pullRequest, files }) => {
         this.pullRequest.set(pullRequest);
         this.files.set(files.items);
-        this.previewData.set(false);
         this.loading.set(false);
       },
       error: (error) => {
         this.loading.set(false);
         this.error.set(
           error?.error?.detail ??
-            'Live PR metadata is unavailable. The interface remains in preview mode.',
+            'Live pull request metadata could not be loaded.',
         );
       },
     });
@@ -89,6 +88,11 @@ export class PullRequestPage {
   }
 
   startReview(publish: boolean): void {
+    const pullRequest = this.pullRequest();
+    if (!pullRequest) {
+      this.error.set('Pull request metadata must load before a review can start.');
+      return;
+    }
     this.publishConfirmationOpen.set(false);
     this.submitting.set(true);
     this.error.set(null);
@@ -96,7 +100,7 @@ export class PullRequestPage {
       .startReview({
         provider: this.provider(),
         repository: this.repository(),
-        pull_number: this.pullRequest().number,
+        pull_number: pullRequest.number,
         review_depth: this.depth(),
         publish,
         max_workers: this.preferences.maxWorkers(),
@@ -116,9 +120,9 @@ export class PullRequestPage {
     return `file-status ${status.toLowerCase()}`;
   }
 
-  authorInitials(): string {
-    return this.pullRequest()
-      .author.split(/\s+/)
+  authorInitials(author: string): string {
+    return author
+      .split(/\s+/)
       .slice(0, 2)
       .map((part) => part.charAt(0))
       .join('')

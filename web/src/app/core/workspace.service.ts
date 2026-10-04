@@ -1,22 +1,21 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { finalize } from 'rxjs';
+import { catchError, finalize, forkJoin, of } from 'rxjs';
 
 import { ReviewerApi } from './api.service';
-import { DEMO_PULL_REQUESTS } from './demo-data';
-import { ProviderId, PullRequestSummary } from './models';
+import { ProviderId, PullRequestSummary, ReviewJob } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
   private readonly api = inject(ReviewerApi);
 
-  readonly provider = signal<ProviderId>('azure-devops');
-  readonly organization = signal('noventra-ai-labs');
-  readonly project = signal('pr-reviewer-lab');
-  readonly repositoryName = signal('pr-reviewer-lab');
-  readonly pullRequests = signal<PullRequestSummary[]>(DEMO_PULL_REQUESTS);
+  readonly provider = signal<ProviderId>('github');
+  readonly organization = signal('');
+  readonly project = signal('');
+  readonly repositoryName = signal('');
+  readonly pullRequests = signal<PullRequestSummary[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
-  readonly previewData = signal(true);
+  readonly loaded = signal(false);
 
   readonly repository = computed(() => {
     if (this.provider() === 'github') {
@@ -28,28 +27,46 @@ export class WorkspaceService {
       .join('/');
   });
 
+  readonly hasRepositorySelection = computed(() => {
+    if (!this.organization().trim() || !this.repositoryName().trim()) return false;
+    return this.provider() === 'github' || Boolean(this.project().trim());
+  });
+
   constructor() {
     this.restore();
+    if (this.hasRepositorySelection()) this.refreshPullRequests();
   }
 
   refreshPullRequests(): void {
     const repository = this.repository();
-    if (!repository) {
-      this.error.set('Enter a valid repository before refreshing.');
+    if (!this.hasRepositorySelection()) {
+      this.error.set(
+        this.provider() === 'github'
+          ? 'Enter the GitHub owner and repository.'
+          : 'Enter the Azure DevOps organization, project, and repository.',
+      );
       return;
     }
     this.loading.set(true);
     this.error.set(null);
     this.persist();
-    this.api
-      .listPullRequests(this.provider(), repository)
+    forkJoin({
+      pullRequests: this.api.listPullRequests(this.provider(), repository),
+      reviews: this.api
+        .listReviews(200)
+        .pipe(catchError(() => of({ items: [], total: 0 }))),
+    })
       .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
-        next: (response) => {
-          this.pullRequests.set(response.items);
-          this.previewData.set(false);
+        next: ({ pullRequests, reviews }) => {
+          this.pullRequests.set(
+            pullRequests.items.map((item) => this.withReviewStatus(item, reviews.items)),
+          );
+          this.loaded.set(true);
         },
         error: (error) => {
+          this.pullRequests.set([]);
+          this.loaded.set(true);
           const detail = error?.error?.detail ?? error?.message ?? 'Unable to load pull requests.';
           this.error.set(detail);
         },
@@ -57,8 +74,37 @@ export class WorkspaceService {
   }
 
   setProvider(provider: ProviderId): void {
+    if (provider === this.provider()) return;
     this.provider.set(provider);
+    this.pullRequests.set([]);
+    this.error.set(null);
+    this.loaded.set(false);
     this.persist();
+  }
+
+  private withReviewStatus(
+    pullRequest: PullRequestSummary,
+    jobs: ReviewJob[],
+  ): PullRequestSummary {
+    const latest = jobs.find(
+      (job) =>
+        job.command.provider === this.provider() &&
+        job.command.repository === this.repository() &&
+        job.command.pull_number === pullRequest.number,
+    );
+    if (!latest) return { ...pullRequest, review_status: 'awaiting' };
+    const decision = latest.result?.quality_gate.decision ?? latest.result_summary?.decision;
+    const reviewStatus =
+      latest.status !== 'completed'
+        ? 'awaiting'
+        : decision === 'pass'
+          ? 'passed'
+          : 'blocked';
+    return {
+      ...pullRequest,
+      review_status: reviewStatus,
+      updated_at: pullRequest.updated_at ?? latest.created_at,
+    };
   }
 
   private persist(): void {

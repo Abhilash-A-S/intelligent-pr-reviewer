@@ -4,7 +4,6 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ReviewerApi } from '../../core/api.service';
-import { DEMO_JOB, DEMO_RESULT } from '../../core/demo-data';
 import { ReviewFinding, ReviewJob, ReviewResult, Severity } from '../../core/models';
 import { Icon } from '../../shared/icon';
 
@@ -19,10 +18,10 @@ export class ReviewResultsPage {
   private readonly router = inject(Router);
   private readonly api = inject(ReviewerApi);
 
-  readonly jobId = this.route.snapshot.paramMap.get('jobId') ?? 'demo';
-  readonly job = signal<ReviewJob>({ ...DEMO_JOB, id: this.jobId, status: 'completed', result: DEMO_RESULT });
-  readonly result = signal<ReviewResult>(DEMO_RESULT);
-  readonly loading = signal(this.jobId !== 'demo');
+  readonly jobId = this.route.snapshot.paramMap.get('jobId') ?? '';
+  readonly job = signal<ReviewJob | null>(null);
+  readonly result = signal<ReviewResult | null>(null);
+  readonly loading = signal(true);
   readonly error = signal<string | null>(null);
   readonly severity = signal<'all' | Severity>('all');
   readonly source = signal<'all' | 'static' | 'llm' | 'framework'>('all');
@@ -34,7 +33,7 @@ export class ReviewResultsPage {
     const severity = this.severity();
     const source = this.source();
     const search = this.search().trim().toLowerCase();
-    return this.result().findings.filter((finding) => {
+    return (this.result()?.findings ?? []).filter((finding) => {
       const matchesSeverity = severity === 'all' || finding.severity === severity;
       const matchesSource = source === 'all' || finding.source === source;
       const haystack = `${finding.file_path} ${finding.rule_id} ${finding.issue ?? finding.message}`.toLowerCase();
@@ -43,7 +42,8 @@ export class ReviewResultsPage {
   });
 
   readonly totalFindings = computed(() => {
-    const quality = this.result().quality_gate;
+    const quality = this.result()?.quality_gate;
+    if (!quality) return 0;
     return (
       quality.critical_count +
       quality.high_count +
@@ -56,33 +56,43 @@ export class ReviewResultsPage {
   readonly rejectedAiFindings = computed(() =>
     Math.max(
       0,
-      this.result().diagnostics.raw_ai_findings - this.result().diagnostics.final_ai_findings,
+      (this.result()?.diagnostics.raw_ai_findings ?? 0) -
+        (this.result()?.diagnostics.final_ai_findings ?? 0),
     ),
   );
 
   constructor() {
-    if (this.jobId !== 'demo') {
-      this.api.getReview(this.jobId).subscribe({
-        next: (job) => {
-          this.job.set(job);
-          if (job.result) this.result.set(job.result);
-          this.loading.set(false);
-        },
-        error: (error) => {
-          this.loading.set(false);
-          this.error.set(error?.error?.detail ?? 'Unable to load the review result.');
-        },
-      });
+    if (!this.jobId) {
+      this.loading.set(false);
+      this.error.set('No review job was specified.');
+      return;
     }
+    this.api.getReview(this.jobId).subscribe({
+      next: (job) => {
+        this.job.set(job);
+        if (job.result) {
+          this.result.set(job.result);
+        } else if (job.status === 'queued' || job.status === 'running') {
+          void this.router.navigate(['/reviews', job.id, 'progress']);
+        } else {
+          this.error.set(job.error ?? 'This review completed without a result payload.');
+        }
+        this.loading.set(false);
+      },
+      error: (error) => {
+        this.loading.set(false);
+        this.error.set(error?.error?.detail ?? 'Unable to load the review result.');
+      },
+    });
   }
 
   decisionLabel(): string {
-    return this.result().quality_gate.decision.replaceAll('_', ' ').toUpperCase();
+    return (this.result()?.quality_gate.decision ?? 'unknown').replaceAll('_', ' ').toUpperCase();
   }
 
   completedLabel(): string {
-    const timestamp = this.job().completed_at;
-    if (!timestamp) return 'just now';
+    const timestamp = this.job()?.completed_at;
+    if (!timestamp) return '—';
     return new Date(timestamp).toLocaleString([], {
       month: 'short',
       day: 'numeric',
@@ -104,17 +114,23 @@ export class ReviewResultsPage {
   }
 
   downloadJson(): void {
-    const blob = new Blob([JSON.stringify(this.result(), null, 2)], { type: 'application/json' });
+    const result = this.result();
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `review-${this.result().pull_request.number}.json`;
+    anchor.download = `review-${result.pull_request.number}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
 
   publish(): void {
     const current = this.result();
+    if (!current) {
+      this.error.set('The review result is unavailable.');
+      return;
+    }
     this.publishConfirmationOpen.set(false);
     this.publishing.set(true);
     this.api

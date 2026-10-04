@@ -20,6 +20,7 @@ export class SettingsPage {
   readonly preferences = inject(ReviewPreferencesService);
   readonly activeTab = signal<SettingsTab>('integrations');
   readonly health = signal<HealthResponse | null>(null);
+  readonly error = signal<string | null>(null);
   readonly checking = signal(false);
   readonly saved = signal(false);
   readonly depthOptions: ReadonlyArray<{ value: ReviewDepth; label: string; desc: string }> = [
@@ -34,14 +35,16 @@ export class SettingsPage {
 
   loadHealth(): void {
     this.checking.set(true);
+    this.error.set(null);
     this.api.health(true).subscribe({
       next: (response) => {
         this.health.set(response);
         this.checking.set(false);
       },
-      error: () => {
+      error: (error) => {
         this.health.set(null);
         this.checking.set(false);
+        this.error.set(error?.error?.detail ?? 'Runtime health could not be loaded.');
       },
     });
   }

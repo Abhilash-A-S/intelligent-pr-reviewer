@@ -14,20 +14,13 @@ interface HistoryRow {
   pullNumber: number;
   title: string;
   author: string;
-  decision: 'blocked' | 'changes' | 'passed' | 'running';
+  decision: 'blocked' | 'changes' | 'passed' | 'running' | 'failed';
   findings: number;
   mode: 'Dry run' | 'Published';
   duration: string;
   created: string;
+  createdAt: Date;
 }
-
-const PREVIEW_HISTORY: HistoryRow[] = [
-  { id: 'RVW-7F3A91', provider: 'azure-devops', repository: 'pr-reviewer-lab', pullNumber: 48, title: 'Improve checkout validation', author: 'Maya Patel', decision: 'blocked', findings: 56, mode: 'Dry run', duration: '24.2s', created: 'Today, 10:42' },
-  { id: 'RVW-62B110', provider: 'github', repository: 'commerce-web', pullNumber: 147, title: 'Harden payment webhook verification', author: 'Daniel Kim', decision: 'changes', findings: 12, mode: 'Published', duration: '18.8s', created: 'Today, 09:15' },
-  { id: 'RVW-4C10EE', provider: 'azure-devops', repository: 'catalog-api', pullNumber: 46, title: 'Add product search result caching', author: 'Amelia Stone', decision: 'passed', findings: 0, mode: 'Published', duration: '11.4s', created: 'Yesterday, 17:38' },
-  { id: 'RVW-1A8CF2', provider: 'github', repository: 'platform-services', pullNumber: 312, title: 'Refactor order repository pagination', author: 'Noah Williams', decision: 'changes', findings: 7, mode: 'Dry run', duration: '31.0s', created: 'Yesterday, 14:06' },
-  { id: 'RVW-90DBA4', provider: 'azure-devops', repository: 'pr-reviewer-lab', pullNumber: 44, title: 'Update CI deployment protections', author: 'Olivia Martin', decision: 'passed', findings: 2, mode: 'Published', duration: '9.7s', created: 'Sep 30, 16:21' },
-];
 
 @Component({
   selector: 'app-history-page',
@@ -37,39 +30,27 @@ const PREVIEW_HISTORY: HistoryRow[] = [
 })
 export class HistoryPage {
   private readonly api = inject(ReviewerApi);
-  readonly rows = signal<HistoryRow[]>(PREVIEW_HISTORY);
-  readonly previewData = signal(true);
+  readonly rows = signal<HistoryRow[]>([]);
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
   readonly search = signal('');
   readonly provider = signal<'all' | 'github' | 'azure-devops'>('all');
-  readonly decision = signal<'all' | 'blocked' | 'changes' | 'passed' | 'running'>('all');
-  readonly trendBars = [
-    { passed: 24, blocked: 10 }, { passed: 31, blocked: 18 }, { passed: 29, blocked: 12 },
-    { passed: 42, blocked: 25 }, { passed: 58, blocked: 30 }, { passed: 37, blocked: 20 },
-    { passed: 49, blocked: 27 }, { passed: 61, blocked: 35 }, { passed: 45, blocked: 24 },
-    { passed: 56, blocked: 31 }, { passed: 39, blocked: 19 }, { passed: 67, blocked: 38 },
-    { passed: 48, blocked: 22 }, { passed: 60, blocked: 28 }, { passed: 72, blocked: 41 },
-    { passed: 52, blocked: 25 }, { passed: 64, blocked: 34 }, { passed: 47, blocked: 21 },
-    { passed: 69, blocked: 37 }, { passed: 55, blocked: 24 }, { passed: 76, blocked: 43 },
-    { passed: 58, blocked: 29 }, { passed: 66, blocked: 33 }, { passed: 49, blocked: 20 },
-    { passed: 79, blocked: 46 }, { passed: 62, blocked: 27 }, { passed: 71, blocked: 35 },
-    { passed: 54, blocked: 23 }, { passed: 74, blocked: 39 }, { passed: 65, blocked: 31 },
-    { passed: 77, blocked: 42 },
-  ] as const;
+  readonly decision = signal<'all' | HistoryRow['decision']>('all');
 
   readonly metrics = computed(() => {
-    if (this.previewData()) {
-      return { total: 128, completed: 34, blocked: 21, published: 107, blockedRate: '16.4' };
-    }
     const rows = this.rows();
-    const blocked = rows.filter((row) => row.decision === 'blocked').length;
+    const now = new Date();
+    const completedThisMonth = rows.filter(
+      (row) =>
+        row.decision !== 'running' &&
+        row.createdAt.getFullYear() === now.getFullYear() &&
+        row.createdAt.getMonth() === now.getMonth(),
+    ).length;
     return {
       total: rows.length,
-      completed: rows.filter((row) => row.decision !== 'running').length,
-      blocked,
+      completed: completedThisMonth,
+      blocked: rows.filter((row) => row.decision === 'blocked').length,
       published: rows.filter((row) => row.mode === 'Published').length,
-      blockedRate: rows.length ? ((blocked / rows.length) * 100).toFixed(1) : '0.0',
     };
   });
 
@@ -83,23 +64,68 @@ export class HistoryPage {
     });
   });
 
+  readonly trend = computed(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const days = Array.from({ length: 31 }, (_value, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (30 - index));
+      const matching = this.rows().filter((row) => this.sameDay(row.createdAt, date));
+      return {
+        date,
+        passed: matching.filter((row) => row.decision === 'passed').length,
+        blocked: matching.filter((row) => ['blocked', 'changes', 'failed'].includes(row.decision)).length,
+      };
+    });
+    const maximum = Math.max(1, ...days.flatMap((day) => [day.passed, day.blocked]));
+    return days.map((day) => ({
+      ...day,
+      passedHeight: (day.passed / maximum) * 100,
+      blockedHeight: (day.blocked / maximum) * 100,
+    }));
+  });
+
+  readonly historyRangeLabel = computed(() => {
+    const trend = this.trend();
+    if (!trend.length) return '—';
+    const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${format.format(trend[0].date)} – ${format.format(trend.at(-1)!.date)}`;
+  });
+
+  readonly trendLabels = computed(() => {
+    const trend = this.trend();
+    const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+    return [0, 6, 12, 18, 24, 30].map((index) => format.format(trend[index].date));
+  });
+
   constructor() {
-    this.api.listReviews().subscribe({
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.error.set(null);
+    this.api.listReviews(200).subscribe({
       next: (response) => {
-        if (response.items.length) {
-          this.rows.set(response.items.map((job) => this.fromJob(job)));
-          this.previewData.set(false);
-        }
+        this.rows.set(response.items.map((job) => this.fromJob(job)));
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: (error) => {
+        this.rows.set([]);
+        this.loading.set(false);
+        this.error.set(error?.error?.detail ?? 'Review history could not be loaded.');
+      },
     });
   }
 
   decisionLabel(decision: HistoryRow['decision']): string {
-    return { blocked: 'Block merge', changes: 'Request changes', passed: 'Passed', running: 'Running' }[
-      decision
-    ];
+    return {
+      blocked: 'Block merge',
+      changes: 'Request changes',
+      passed: 'Passed',
+      running: 'Running',
+      failed: 'Failed',
+    }[decision];
   }
 
   initials(author: string): string {
@@ -112,7 +138,10 @@ export class HistoryPage {
   }
 
   exportHistory(): void {
-    const blob = new Blob([JSON.stringify(this.filteredRows(), null, 2)], {
+    const rows = this.filteredRows();
+    if (!rows.length) return;
+    const exportRows = rows.map(({ createdAt: _createdAt, ...row }) => row);
+    const blob = new Blob([JSON.stringify(exportRows, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
@@ -129,28 +158,42 @@ export class HistoryPage {
     const total = quality
       ? quality.critical_count + quality.high_count + quality.medium_count + quality.low_count + quality.suggestion_count
       : (summary?.findings ?? 0);
-    const qualityDecision = quality?.decision ?? summary?.decision;
+    const qualityDecision = String(quality?.decision ?? summary?.decision ?? '').toLowerCase();
     const decision: HistoryRow['decision'] =
-      job.status !== 'completed'
+      job.status === 'queued' || job.status === 'running'
         ? 'running'
-        : qualityDecision === 'block'
-          ? 'blocked'
-          : qualityDecision === 'pass'
+        : job.status === 'failed' || job.status === 'cancelled'
+          ? 'failed'
+          : qualityDecision.includes('pass')
             ? 'passed'
-            : 'changes';
+            : qualityDecision.includes('block')
+              ? 'blocked'
+              : 'changes';
     const duration = job.result?.diagnostics.total_review_seconds ?? summary?.duration_seconds;
+    const createdAt = new Date(job.created_at);
     return {
       id: job.id,
       provider: job.command.provider,
       repository: job.command.repository.split('/').at(-1) ?? job.command.repository,
       pullNumber: job.command.pull_number,
       title: job.result?.pull_request.title ?? summary?.title ?? `Pull request #${job.command.pull_number}`,
-      author: job.result?.pull_request.author ?? summary?.author ?? 'Unknown author',
+      author: job.result?.pull_request.author ?? summary?.author ?? 'Unavailable',
       decision,
       findings: total,
       mode: job.command.publish ? 'Published' : 'Dry run',
       duration: typeof duration === 'number' ? `${duration.toFixed(1)}s` : '—',
-      created: new Date(job.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      created: Number.isNaN(createdAt.getTime())
+        ? '—'
+        : createdAt.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      createdAt,
     };
+  }
+
+  private sameDay(first: Date, second: Date): boolean {
+    return (
+      first.getFullYear() === second.getFullYear() &&
+      first.getMonth() === second.getMonth() &&
+      first.getDate() === second.getDate()
+    );
   }
 }

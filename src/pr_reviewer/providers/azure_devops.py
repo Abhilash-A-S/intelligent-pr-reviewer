@@ -287,6 +287,9 @@ class AzureDevOpsProvider(PullRequestProvider):
                             "refs/heads/"
                         ),
                         state=pr.get("status", ""),
+                        updated_at=(
+                            pr.get("closedDate") or pr.get("creationDate")
+                        ),
                     )
                 )
 
@@ -333,6 +336,7 @@ class AzureDevOpsProvider(PullRequestProvider):
                 "refs/heads/"
             ),
             head_commit=head_commit,
+            description=data.get("description") or None,
         )
 
     def _get_iteration_context(

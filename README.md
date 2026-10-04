@@ -21,6 +21,11 @@ same `ReviewOrchestrator`; review logic is not duplicated in the UI.
 - Light and dark themes, responsive navigation and Lucide icons
 - Server-only provider credentials; tokens never enter the browser bundle
 
+Every product record shown in the UI comes from the FastAPI endpoints. There
+are no seeded pull requests, findings, review jobs, history rows, provider
+statuses, or runtime settings. Until a repository is selected, the dashboard
+shows an intentional empty state instead of sample content.
+
 ## Requirements
 
 - Python 3.12 or later
@@ -55,6 +60,11 @@ uv run intelligent-pr-reviewer-api
 
 Open `http://127.0.0.1:8000`. FastAPI serves the Angular application and all
 `/api` routes from one process.
+
+On first launch, select GitHub or Azure DevOps, enter the repository details,
+and choose **Refresh**. Pull requests then come directly from the configured
+provider. Review progress, results, and history are populated only by reviews
+started through the current API process.
 
 ## Frontend development with live reload
 

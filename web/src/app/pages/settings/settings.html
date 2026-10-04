@@ -5,6 +5,7 @@
   </header>
 
   @if (saved()) { <div class="toast-message success"><app-icon name="check-circle-2" />Settings saved for this browser.</div> }
+  @if (error()) { <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() }}</span></div> }
 
   <nav class="settings-top-tabs" aria-label="Settings sections">
     <button type="button" [class.active]="activeTab() === 'integrations'" (click)="activeTab.set('integrations')">Integrations</button>
@@ -21,13 +22,13 @@
         <article class="provider-settings-card">
           <header><span class="integration-logo"><app-provider-mark provider="github" /></span><div><h3>GitHub</h3><p>Pull requests and review comments</p></div><span [class]="connected('github') ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ connected('github') ? 'Connected' : 'Not configured' }}</span></header>
           <dl><div><dt>Authentication</dt><dd>GITHUB_TOKEN <app-icon name="lock-keyhole" /></dd></div><div><dt>Access</dt><dd>Repository read/write</dd></div></dl>
-          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button">Configure</button></footer>
+          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button" disabled title="Configure GITHUB_TOKEN on the API server">Server managed</button></footer>
         </article>
 
         <article class="provider-settings-card">
           <header><span class="integration-logo"><app-provider-mark provider="azure-devops" /></span><div><h3>Azure DevOps</h3><p>Repositories and PR threads</p></div><span [class]="connected('azure-devops') ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ connected('azure-devops') ? 'Connected' : 'Not configured' }}</span></header>
           <dl><div><dt>Authentication</dt><dd>AZURE_DEVOPS_PAT <app-icon name="lock-keyhole" /></dd></div><div><dt>Access</dt><dd>Code read/write</dd></div></dl>
-          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button">Configure</button></footer>
+          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button" disabled title="Configure AZURE_DEVOPS_PAT on the API server">Server managed</button></footer>
         </article>
       </section>
 
@@ -35,7 +36,7 @@
         <div class="section-heading"><div><h2>AI provider</h2><p>Configure your local or remote AI provider.</p></div></div>
         <article class="ai-provider-card">
           <header><span class="integration-logo"><app-icon name="bot" /></span><div><h3>Ollama</h3><p>Local AI provider</p></div><span [class]="health()?.ollama?.ready ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ health()?.ollama?.ready ? 'Ready' : 'Unavailable' }}</span></header>
-          <dl><div><dt>Model</dt><dd>{{ health()?.ollama?.model ?? 'qwen2.5-coder:7b' }}</dd></div><div><dt>Endpoint</dt><dd>{{ health()?.ollama?.base_url ?? 'http://localhost:11434' }}</dd></div><div><dt>Timeout</dt><dd>300 seconds</dd></div></dl>
+          <dl><div><dt>Model</dt><dd>{{ health()?.ollama?.model ?? '—' }}</dd></div><div><dt>Endpoint</dt><dd>{{ health()?.ollama?.base_url ?? '—' }}</dd></div><div><dt>Timeout</dt><dd>{{ health()?.ollama?.read_timeout_seconds !== undefined ? health()?.ollama?.read_timeout_seconds + ' seconds' : '—' }}</dd></div></dl>
           <button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()"><app-icon name="play" />Test model</button>
         </article>
       </section>
@@ -56,10 +57,10 @@
       <section class="card settings-panel" [class.focus-panel]="activeTab() === 'publishing'">
         <div class="section-heading"><div><h2>Publishing controls</h2><p>Configure how review results are published.</p></div></div>
         <div class="compact-settings-form">
-          <label class="field policy-setting"><span>Maximum inline comments <app-icon name="lock-keyhole" /></span><div class="input-shell"><input type="number" value="40" disabled /></div></label>
-          <label class="inline-toggle policy-setting"><span><strong>Confirmation before publish</strong><small>Required before writing provider comments</small></span><input type="checkbox" checked disabled /><i></i></label>
-          <label class="inline-toggle policy-setting"><span><strong>Duplicate prevention</strong><small>Avoid duplicate reviews for the same PR</small></span><input type="checkbox" checked disabled /><i></i></label>
-          <label class="inline-toggle policy-setting"><span><strong>Summary comment</strong><small>Post key findings in one updateable summary</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="field policy-setting"><span>Maximum inline comments <app-icon name="lock-keyhole" /></span><div class="input-shell"><input type="number" [value]="health()?.review_policy?.max_inline_comments ?? ''" placeholder="—" disabled /></div></label>
+          <label class="inline-toggle policy-setting"><span><strong>Confirmation before publish</strong><small>Required before writing provider comments</small></span><input type="checkbox" [checked]="health()?.review_policy?.confirmation_before_publish ?? false" disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Duplicate prevention</strong><small>Avoid duplicate reviews for the same PR</small></span><input type="checkbox" [checked]="health()?.review_policy?.duplicate_prevention ?? false" disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Summary comment</strong><small>Post key findings in one updateable summary</small></span><input type="checkbox" [checked]="health()?.review_policy?.summary_comment ?? false" disabled /><i></i></label>
         </div>
       </section>
 

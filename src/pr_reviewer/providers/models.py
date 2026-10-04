@@ -11,3 +11,4 @@ class PullRequestSummary:
     base_branch: str
     head_branch: str
     state: str
+    updated_at: str | None = None

@@ -49,8 +49,8 @@
         <app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" />
       </button>
       <button class="profile-button" type="button" aria-label="Open user menu">
-        <span class="avatar">AS</span>
-        <span class="profile-copy"><strong>Abhilash</strong><small>Administrator</small></span>
+        <span class="avatar">IR</span>
+        <span class="profile-copy"><strong>Review engine</strong><small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small></span>
         <app-icon name="chevron-down" />
       </button>
       <button

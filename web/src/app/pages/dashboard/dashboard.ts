@@ -36,9 +36,6 @@ export class DashboardPage {
 
   readonly metrics = computed(() => {
     const pullRequests = this.workspace.pullRequests();
-    if (this.workspace.previewData()) {
-      return { open: 12, awaiting: 3, blocked: 2, passed: 7 };
-    }
     return {
       open: pullRequests.length,
       awaiting: pullRequests.filter((item) => (item.review_status ?? 'awaiting') === 'awaiting')
@@ -70,5 +67,32 @@ export class DashboardPage {
       default:
         return 'Awaiting review';
     }
+  }
+
+  relativeTime(value?: string): string {
+    if (!value) return '—';
+    const timestamp = new Date(value).getTime();
+    if (!Number.isFinite(timestamp)) return value;
+    const seconds = Math.round((timestamp - Date.now()) / 1000);
+    const ranges: ReadonlyArray<[number, Intl.RelativeTimeFormatUnit]> = [
+      [60, 'second'],
+      [60, 'minute'],
+      [24, 'hour'],
+      [7, 'day'],
+      [4.345, 'week'],
+      [12, 'month'],
+      [Number.POSITIVE_INFINITY, 'year'],
+    ];
+    let amount = seconds;
+    for (const [limit, unit] of ranges) {
+      if (Math.abs(amount) < limit) {
+        return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(
+          Math.round(amount),
+          unit,
+        );
+      }
+      amount /= limit;
+    }
+    return value;
   }
 }

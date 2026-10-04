@@ -44,6 +44,7 @@ class GitHubProvider(PullRequestProvider):
                         base_branch=pr["base"]["ref"],
                         head_branch=pr["head"]["ref"],
                         state=pr["state"],
+                        updated_at=pr.get("updated_at"),
                     )
                 )
             if len(batch) < 30:
@@ -100,6 +101,8 @@ class GitHubProvider(PullRequestProvider):
             base_branch=data["base"]["ref"],
             head_branch=data["head"]["ref"],
             head_commit=data["head"]["sha"],
+            description=data.get("body") or None,
+            commit_count=data.get("commits"),
         )
 
     def get_changed_files(

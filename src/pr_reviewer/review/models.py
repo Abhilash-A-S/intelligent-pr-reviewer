@@ -29,6 +29,8 @@ class PullRequest:
     base_branch: str
     head_branch: str
     head_commit: str
+    description: str | None = None
+    commit_count: int | None = None
 
 
 @dataclass

@@ -260,7 +260,8 @@ class ReviewOrchestrator:
 
         self.publishing_service = (
             PublishingService(
-                provider=provider
+                provider=provider,
+                max_inline_comments=self._resolve_max_inline_comments(),
             )
         )
 
@@ -269,6 +270,14 @@ class ReviewOrchestrator:
                 provider=provider
             )
         )
+
+    @staticmethod
+    def _resolve_max_inline_comments() -> int:
+        try:
+            configured = int(os.getenv("PR_REVIEW_MAX_INLINE_COMMENTS", "40"))
+        except ValueError:
+            configured = 40
+        return max(0, min(configured, 200))
 
     @staticmethod
     def _resolve_max_llm_workers(

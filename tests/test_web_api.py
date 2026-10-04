@@ -3,7 +3,7 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from pr_reviewer.providers.models import PullRequestSummary
-from pr_reviewer.review.models import ChangedFile, ChangedLine
+from pr_reviewer.review.models import ChangedFile, ChangedLine, PullRequest
 from pr_reviewer.web import api as web_api
 
 
@@ -43,6 +43,24 @@ def test_health_reports_connections_without_exposing_credentials(monkeypatch):
     assert "azure-secret-value" not in rendered
 
 
+def test_health_reports_runtime_configuration_without_exposing_credentials(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "review-model")
+    monkeypatch.setenv("OLLAMA_READ_TIMEOUT", "180")
+    monkeypatch.setenv("PR_REVIEW_MAX_INLINE_COMMENTS", "27")
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+
+    payload = client.get("/api/health").json()
+
+    assert payload["ollama"]["model"] == "review-model"
+    assert payload["ollama"]["read_timeout_seconds"] == 180
+    assert payload["review_policy"] == {
+        "max_inline_comments": 27,
+        "confirmation_before_publish": True,
+        "duplicate_prevention": True,
+        "summary_comment": True,
+    }
+
+
 def test_pull_request_listing_uses_provider_neutral_summary(monkeypatch):
     provider = Mock()
     provider.list_pull_requests.return_value = [
@@ -68,6 +86,34 @@ def test_pull_request_listing_uses_provider_neutral_summary(monkeypatch):
     assert payload["total"] == 1
     assert payload["items"][0]["number"] == 14
     provider.list_pull_requests.assert_called_once_with("acme/store", state="open")
+
+
+def test_pull_request_detail_returns_live_provider_metadata(monkeypatch):
+    provider = Mock()
+    provider.get_pull_request.return_value = PullRequest(
+        provider="github",
+        repository="acme/store",
+        number=14,
+        title="Use live UI data",
+        author="reviewer",
+        base_branch="main",
+        head_branch="feature/live-data",
+        state="open",
+        head_commit="abc123",
+        description="Removes preview fixtures from the product UI.",
+        commit_count=3,
+    )
+    monkeypatch.setattr(web_api, "create_pull_request_provider", lambda _name: provider)
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+
+    response = client.get(
+        "/api/pull-requests/14",
+        params={"provider": "github", "repository": "acme/store"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["description"] == "Removes preview fixtures from the product UI."
+    assert response.json()["commit_count"] == 3
 
 
 def test_changed_files_include_diff_statistics_without_counting_headers(monkeypatch):

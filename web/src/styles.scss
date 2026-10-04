@@ -1216,3 +1216,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .modal-backdrop { padding: 12px; }
   .pr-table, .history-table { min-width: 760px; table-layout: auto; }
 }
+
+/* Live-data route states */
+.route-state-card {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 44px;
+  text-align: center;
+}
+
+.route-state-card h1 { margin: 0; font-size: 22px; }
+.route-state-card p { max-width: 520px; margin: 0 0 8px; color: var(--text-muted); }
+.route-state-card .empty-illustration.loading app-icon { animation: spin 1s linear infinite; }
+.empty-state.compact { min-height: 128px; padding: 22px; }
+.live-data-label { color: var(--success); font-size: 10px; font-weight: 700; }
+.decision-pill.failed { background: var(--danger-soft); color: var(--danger); }
+.decision-pill.failed > span { background: var(--danger); }

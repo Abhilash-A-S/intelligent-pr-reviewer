@@ -1,8 +1,10 @@
 <section class="page history-page">
   <header class="page-heading heading-with-action">
     <div><h1>Review History</h1><p>Previous pull request reviews across providers</p></div>
-    @if (previewData()) { <span class="preview-badge"><app-icon name="sparkles" />Preview data</span> }
+    <button class="button secondary" type="button" [disabled]="loading()" (click)="load()"><app-icon name="refresh-cw" />{{ loading() ? 'Loading…' : 'Refresh' }}</button>
   </header>
+
+  @if (error()) { <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() }}</span></div> }
 
   <div class="metric-grid history-metrics">
     <article class="metric-card neutral"><span class="metric-icon"><app-icon name="file-text" /></span><span><strong>{{ metrics().total }}</strong><small>Total reviews</small></span></article>
@@ -14,9 +16,9 @@
   <section class="card history-filters" aria-label="History filters">
     <label class="search-field"><app-icon name="search" /><input type="search" placeholder="Search reviews, PR title, or author…" [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
     <label class="select-shell"><select [ngModel]="provider()" (ngModelChange)="provider.set($event)"><option value="all">All providers</option><option value="github">GitHub</option><option value="azure-devops">Azure DevOps</option></select><app-icon name="chevron-down" /></label>
-    <label class="select-shell"><select [ngModel]="decision()" (ngModelChange)="decision.set($event)"><option value="all">All decisions</option><option value="blocked">Block merge</option><option value="changes">Request changes</option><option value="passed">Passed</option><option value="running">Running</option></select><app-icon name="chevron-down" /></label>
-    <span class="date-range"><app-icon name="calendar" />May 1, 2024 – May 31, 2024</span>
-    <button class="button primary export-history" type="button" (click)="exportHistory()"><app-icon name="download" />Export</button>
+    <label class="select-shell"><select [ngModel]="decision()" (ngModelChange)="decision.set($event)"><option value="all">All decisions</option><option value="blocked">Block merge</option><option value="changes">Request changes</option><option value="passed">Passed</option><option value="running">Running</option><option value="failed">Failed</option></select><app-icon name="chevron-down" /></label>
+    <span class="date-range"><app-icon name="calendar" />{{ historyRangeLabel() }}</span>
+    <button class="button primary export-history" type="button" [disabled]="!filteredRows().length" (click)="exportHistory()"><app-icon name="download" />Export</button>
   </section>
 
   <section class="card data-card history-data-card">
@@ -35,22 +37,26 @@
               <td>{{ row.duration }}</td>
               <td><span class="mode-pill">{{ row.mode }}</span></td>
               <td>{{ row.created }}</td>
-              <td>@if (row.decision === 'running') { <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']">View progress</a> } @else { <a class="button table-button" [routerLink]="['/reviews', row.id, 'results']">View Results</a> }</td>
+              <td>@if (row.decision === 'running') { <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']">View progress</a> } @else if (row.decision !== 'failed') { <a class="button table-button" [routerLink]="['/reviews', row.id, 'results']">View Results</a> } @else { <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']">View failure</a> }</td>
             </tr>
+          } @empty {
+            <tr><td colspan="10"><div class="empty-state"><app-icon name="history" />@if (loading()) { <strong>Loading review history…</strong><span>Reading jobs from the current review-engine process.</span> } @else if (search() || provider() !== 'all' || decision() !== 'all') { <strong>No matching reviews</strong><span>Adjust the history filters.</span> } @else { <strong>No reviews yet</strong><span>Run a dry review or publish a review to create live history.</span> }</div></td></tr>
           }
         </tbody>
       </table>
     </div>
-    <footer class="table-footer"><span>Showing {{ filteredRows().length }} of {{ metrics().total }} reviews</span><div class="pagination"><button type="button" disabled aria-label="Previous page"><app-icon name="chevron-left" /></button><button type="button" class="active">1</button><button type="button">2</button><button type="button">3</button><button type="button">4</button><button type="button">5</button><button type="button" aria-label="Next page"><app-icon name="chevron-right" /></button></div></footer>
+    <footer class="table-footer"><span>Showing {{ filteredRows().length }} of {{ metrics().total }} reviews</span>@if (rows().length) { <span class="live-data-label">Current API session</span> }</footer>
   </section>
 
-  @if (previewData()) {
-    <section class="card history-chart-card">
-      <div class="card-heading"><div><h2>Review quality trend</h2><p>Number of reviews by day and decision</p></div><div class="chart-legend"><span><i class="reviews"></i>Passed</span><span><i class="blocked"></i>Blocked</span></div></div>
+  <section class="card history-chart-card">
+    <div class="card-heading"><div><h2>Review quality trend</h2><p>Completed review decisions over the last 31 days</p></div><div class="chart-legend"><span><i class="reviews"></i>Passed</span><span><i class="blocked"></i>Blocked</span></div></div>
+    @if (rows().length) {
       <div class="bar-chart" aria-label="Review quality trend chart">
-        @for (bar of trendBars; track $index) { <span class="bar-pair"><i class="passed" [style.height.%]="bar.passed"></i><i class="blocked" [style.height.%]="bar.blocked"></i></span> }
+        @for (bar of trend(); track bar.date.getTime()) { <span class="bar-pair" [attr.title]="bar.date.toLocaleDateString() + ': ' + bar.passed + ' passed, ' + bar.blocked + ' blocked'"><i class="passed" [style.height.%]="bar.passedHeight"></i><i class="blocked" [style.height.%]="bar.blockedHeight"></i></span> }
       </div>
-      <div class="bar-chart-labels"><span>May 1</span><span>May 7</span><span>May 13</span><span>May 19</span><span>May 25</span><span>May 31</span></div>
-    </section>
-  }
+      <div class="bar-chart-labels">@for (label of trendLabels(); track label) { <span>{{ label }}</span> }</div>
+    } @else {
+      <div class="empty-state compact"><app-icon name="activity" /><strong>No trend data yet</strong><span>Completed reviews will appear here automatically.</span></div>
+    }
+  </section>
 </section>
