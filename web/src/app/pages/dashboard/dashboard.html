@@ -1,0 +1,214 @@
+<section class="page dashboard-page">
+  <header class="page-heading heading-with-action">
+    <div>
+      <h1>Pull Requests</h1>
+      <p>Select a pull request to review</p>
+    </div>
+    @if (workspace.previewData()) {
+      <span class="preview-badge"><app-icon name="sparkles" /> Preview data</span>
+    }
+  </header>
+
+  <section class="card repository-filter" aria-labelledby="repository-filter-title">
+    <h2 id="repository-filter-title" class="sr-only">Repository</h2>
+    <div class="provider-picker-row">
+      <div class="segmented-control" aria-label="Provider">
+        <button
+          type="button"
+          [class.active]="workspace.provider() === 'github'"
+          (click)="setProvider('github')"
+        >
+          <app-provider-mark provider="github" /> GitHub
+        </button>
+        <button
+          type="button"
+          [class.active]="workspace.provider() === 'azure-devops'"
+          (click)="setProvider('azure-devops')"
+        >
+          <app-provider-mark provider="azure-devops" /> Azure DevOps
+        </button>
+      </div>
+    </div>
+
+    <div class="filter-grid" [class.github-grid]="workspace.provider() === 'github'">
+      <label class="field">
+        <span>{{ workspace.provider() === 'github' ? 'Owner' : 'Organization' }}</span>
+        <div class="input-shell">
+          <app-icon name="building-2" />
+          <input
+            type="text"
+            [ngModel]="workspace.organization()"
+            (ngModelChange)="workspace.organization.set($event)"
+            autocomplete="off"
+          />
+        </div>
+      </label>
+
+      @if (workspace.provider() === 'azure-devops') {
+        <label class="field">
+          <span>Project</span>
+          <div class="input-shell">
+            <app-icon name="braces" />
+            <input
+              type="text"
+              [ngModel]="workspace.project()"
+              (ngModelChange)="workspace.project.set($event)"
+              autocomplete="off"
+            />
+          </div>
+        </label>
+      }
+
+      <label class="field">
+        <span>Repository</span>
+        <div class="input-shell">
+          <app-icon name="database" />
+          <input
+            type="text"
+            [ngModel]="workspace.repositoryName()"
+            (ngModelChange)="workspace.repositoryName.set($event)"
+            autocomplete="off"
+          />
+        </div>
+      </label>
+
+      <button
+        class="button primary refresh-button"
+        type="button"
+        [disabled]="workspace.loading()"
+        (click)="workspace.refreshPullRequests()"
+      >
+        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
+        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
+      </button>
+    </div>
+
+    @if (workspace.error()) {
+      <div class="inline-alert error-alert" role="alert">
+        <app-icon name="circle-alert" />
+        <span><strong>Could not refresh this repository.</strong> {{ workspace.error() }}</span>
+      </div>
+    }
+  </section>
+
+  <div class="metric-grid dashboard-metrics">
+    <article class="metric-card neutral">
+      <span class="metric-icon"><app-icon name="git-pull-request" /></span>
+      <span><small>Open PRs</small><strong>{{ metrics().open }}</strong></span>
+      <em>Across this repository</em>
+    </article>
+    <article class="metric-card warning">
+      <span class="metric-icon"><app-icon name="clock-3" /></span>
+      <span><small>Awaiting review</small><strong>{{ metrics().awaiting }}</strong></span>
+      <em>Ready to analyse</em>
+    </article>
+    <article class="metric-card danger">
+      <span class="metric-icon"><app-icon name="octagon-alert" /></span>
+      <span><small>Blocked</small><strong>{{ metrics().blocked }}</strong></span>
+      <em>Critical issues found</em>
+    </article>
+    <article class="metric-card success">
+      <span class="metric-icon"><app-icon name="shield-check" /></span>
+      <span><small>Passed</small><strong>{{ metrics().passed }}</strong></span>
+      <em>Quality gate passed</em>
+    </article>
+  </div>
+
+  <section class="card data-card">
+    <div class="table-toolbar">
+      <div class="toolbar-controls">
+        <label class="search-field">
+          <app-icon name="search" />
+          <input
+            type="search"
+            placeholder="Search title, author or branch"
+            [ngModel]="search()"
+            (ngModelChange)="search.set($event)"
+          />
+        </label>
+        <label class="select-shell">
+          <app-icon name="list-filter" />
+          <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
+            <option value="all">All statuses</option>
+            <option value="awaiting">Awaiting review</option>
+            <option value="blocked">Blocked</option>
+            <option value="passed">Passed</option>
+          </select>
+          <app-icon name="chevron-down" />
+        </label>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="data-table pr-table">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>Title</th>
+            <th>Author</th>
+            <th>Branch</th>
+            <th>Files</th>
+            <th>Updated</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (pullRequest of filteredPullRequests(); track pullRequest.number) {
+            <tr>
+              <td><a class="pr-number" [routerLink]="['/pull-requests', pullRequest.number]" [queryParams]="{ provider: workspace.provider(), repository: workspace.repository() }">#{{ pullRequest.number }}</a></td>
+              <td>
+                <a
+                  class="pr-title"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                >
+                  {{ pullRequest.title }}
+                </a>
+              </td>
+              <td><span class="author"><span class="mini-avatar">{{ initials(pullRequest.author) }}</span>{{ pullRequest.author }}</span></td>
+              <td><span class="branch"><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span></td>
+              <td>{{ pullRequest.changed_files ?? '—' }}</td>
+              <td>{{ pullRequest.updated_at ?? 'Just now' }}</td>
+              <td>
+                <span class="status-pill" [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')">
+                  <span></span>{{ statusLabel(pullRequest) }}
+                </span>
+              </td>
+              <td>
+                <a
+                  class="button primary table-review-button"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                  aria-label="Review pull request"
+                >Review</a>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="8">
+                <div class="empty-state"><app-icon name="git-pull-request" /><strong>No matching pull requests</strong><span>Adjust the search or load another repository.</span></div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="table-footer">
+      <span>Showing {{ filteredPullRequests().length }} of {{ workspace.pullRequests().length }} pull requests</span>
+      <div class="pagination">
+        <button type="button" disabled aria-label="Previous page"><app-icon name="chevron-left" /></button>
+        <button type="button" class="active">1</button>
+        <button type="button">2</button>
+        <button type="button" aria-label="Next page"><app-icon name="chevron-right" /></button>
+      </div>
+    </footer>
+  </section>
+</section>

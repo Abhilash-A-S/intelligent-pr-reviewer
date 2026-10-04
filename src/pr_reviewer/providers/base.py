@@ -17,6 +17,7 @@ class PullRequestProvider(ABC):
 
     supports_batch_inline_comments = False
     supports_pull_request_listing = False
+    supports_deferred_patch_hydration = False
     provider_name = "unknown"
     display_name = "Pull Request provider"
 
@@ -76,6 +77,24 @@ class PullRequestProvider(ABC):
         workspace/project ownership but can never produce findings.
         """
         return []
+
+    def hydrate_changed_files(
+        self,
+        repository: str,
+        pull_number: int,
+        changed_files: list[ChangedFile],
+    ) -> list[ChangedFile]:
+        """Populate patches for a selected changed-file subset when supported.
+
+        Providers such as GitHub already return patches from
+        :meth:`get_changed_files` and inherit this no-op implementation. A
+        provider whose API exposes only change metadata can opt into deferred
+        hydration so the orchestrator avoids downloading documentation,
+        binaries, generated output, tooling metadata, and other context-only
+        files that cannot produce findings.
+        """
+
+        return changed_files
 
     @abstractmethod
     def get_file_content(

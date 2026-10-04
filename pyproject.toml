@@ -8,13 +8,16 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.116.1",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.3",
+    "uvicorn>=0.35.0",
 ]
 
 [project.scripts]
 intelligent-pr-reviewer = "pr_reviewer.main:main"
+intelligent-pr-reviewer-api = "pr_reviewer.web.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]
@@ -26,4 +29,9 @@ module-name = "pr_reviewer"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
 ]

@@ -1,0 +1,93 @@
+<section class="page review-results-page">
+  <nav class="breadcrumb" aria-label="Breadcrumb"><a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span>#{{ result().pull_request.number }}</span><app-icon name="chevron-right" /><span>Review results</span></nav>
+
+  <header class="page-heading results-heading">
+    <div><h1>Review results</h1><p class="result-meta">Job ID: {{ job().id.slice(0, 12).toUpperCase() }} <i></i> Completed {{ completedLabel() }} <span class="result-decision"><app-icon name="octagon-alert" />{{ decisionLabel() === 'BLOCK' ? 'Block merge' : decisionLabel() }}</span></p></div>
+  </header>
+
+  @if (error()) { <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() }}</span></div> }
+
+  <div class="severity-grid">
+    <article class="severity-card critical"><span><app-icon name="octagon-alert" /></span><div><small>Critical</small><strong>{{ result().quality_gate.critical_count }}</strong></div></article>
+    <article class="severity-card high"><span><app-icon name="triangle-alert" /></span><div><small>High</small><strong>{{ result().quality_gate.high_count }}</strong></div></article>
+    <article class="severity-card medium"><span><app-icon name="circle-alert" /></span><div><small>Medium</small><strong>{{ result().quality_gate.medium_count }}</strong></div></article>
+    <article class="severity-card low"><span><app-icon name="circle-dot" /></span><div><small>Low</small><strong>{{ result().quality_gate.low_count }}</strong></div></article>
+    <article class="severity-card total"><span><app-icon name="list-filter" /></span><div><small>Total</small><strong>{{ totalFindings() }}</strong></div></article>
+  </div>
+
+  <section class="run-metadata">
+    <div><span>Changed files</span><strong>{{ result().diagnostics.changed_files }}</strong></div>
+    <div><span>Static findings</span><strong>{{ totalFindings() - result().diagnostics.final_ai_findings }}</strong></div>
+    <div><span>AI findings</span><strong>{{ result().diagnostics.final_ai_findings }}</strong></div>
+    <div><span>Review time</span><strong>{{ result().diagnostics.total_review_seconds | number:'1.2-2' }}s</strong></div>
+    <div><span>Review depth</span><strong class="capitalize">{{ result().diagnostics.review_depth }}</strong></div>
+  </section>
+
+  <div class="results-layout">
+    <div class="findings-column">
+      <section class="card findings-toolbar">
+        <div><h2>Findings ({{ totalFindings() }})</h2><p>{{ visibleFindings().length }} visible evidence-grounded findings</p></div>
+        <div class="toolbar-controls">
+          <label class="search-field"><app-icon name="search" /><input type="search" placeholder="Search findings" [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
+          <label class="select-shell"><select [ngModel]="severity()" (ngModelChange)="severity.set($event)"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><app-icon name="chevron-down" /></label>
+          <label class="select-shell"><select [ngModel]="source()" (ngModelChange)="source.set($event)"><option value="all">All sources</option><option value="static">Static</option><option value="framework">Framework</option><option value="llm">AI semantic</option></select><app-icon name="chevron-down" /></label>
+        </div>
+      </section>
+
+      <div class="finding-list">
+        @for (finding of visibleFindings(); track finding.file_path + ':' + finding.line_number + ':' + finding.rule_id) {
+          <article class="finding-card" [class]="'finding-card ' + finding.severity">
+            <header>
+              <span class="finding-severity"><app-icon [name]="severityIcon(finding.severity)" />{{ finding.severity }}</span>
+              <span class="finding-source">{{ finding.source }}</span>
+              <button class="icon-button" type="button" aria-label="Finding actions"><app-icon name="more-horizontal" /></button>
+            </header>
+            <div class="finding-location"><app-icon name="file-code-2" /><strong>{{ finding.file_path }}</strong><span>Line {{ finding.line_number }}</span><code>{{ finding.rule_id }}</code></div>
+            <h3>{{ findingIssue(finding) }}</h3>
+            <dl class="finding-detail">
+              @if (finding.impact) { <div><dt>Impact</dt><dd>{{ finding.impact }}</dd></div> }
+              @if (finding.evidence) { <div class="evidence"><dt>Evidence</dt><dd><code>{{ finding.evidence }}</code></dd></div> }
+              @if (finding.suggestion) { <div class="suggestion"><dt>Suggestion</dt><dd>{{ finding.suggestion }}</dd></div> }
+            </dl>
+          </article>
+        } @empty {
+          <div class="card empty-state"><app-icon name="shield-check" /><strong>No findings match these filters</strong><span>Change the selected severity, source, or search text.</span></div>
+        }
+      </div>
+    </div>
+
+    <aside class="results-sidebar">
+      <section class="card gate-card">
+        <div class="card-heading"><div><h2>Quality gate</h2><p>Merge recommendation</p></div><span class="gate-icon"><app-icon name="shield-check" /></span></div>
+        <strong class="gate-decision">{{ decisionLabel() }}</strong>
+        <ul><li><app-icon name="check" />Deterministic rules evaluated</li><li><app-icon name="check" />Evidence validation completed</li><li><app-icon name="check" />Root causes deduplicated</li></ul>
+      </section>
+
+      <section class="card publishing-card">
+        <div class="card-heading"><div><h2>Publishing</h2><p>Provider comment status</p></div></div>
+        <div class="publish-mode"><span><app-icon [name]="result().dry_run ? 'eye' : 'message-square-text'" /></span><div><strong>{{ result().dry_run ? 'Dry run only' : 'Published' }}</strong><small>{{ result().dry_run ? 'Nothing was written to the provider.' : 'Review comments were sent safely.' }}</small></div></div>
+        <dl><div><dt>Inline comments</dt><dd>{{ result().publishing.published_comments.length }}</dd></div><div><dt>Duplicates skipped</dt><dd>{{ result().publishing.skipped_duplicates }}</dd></div><div><dt>Summary-only</dt><dd>{{ result().publishing.summary_only_findings }}</dd></div></dl>
+        @if (result().dry_run) { <button class="button primary wide" type="button" [disabled]="publishing()" (click)="publishConfirmationOpen.set(true)"><app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish review' }}</button> }
+        <button class="button secondary wide" type="button" (click)="downloadJson()"><app-icon name="file-text" />Export report</button>
+      </section>
+
+      <section class="card rejected-card">
+        <div class="card-heading"><div><h2>Rejected AI findings</h2><p>Low-confidence output removed</p></div><strong>{{ rejectedAiFindings() }}</strong></div>
+        <p>The validation pipeline rejected speculative or duplicate semantic findings before the quality gate.</p>
+        <div class="rejection-bar"><span [style.width.%]="result().diagnostics.raw_ai_findings ? rejectedAiFindings() / result().diagnostics.raw_ai_findings * 100 : 0"></span></div>
+      </section>
+    </aside>
+  </div>
+</section>
+
+@if (publishConfirmationOpen()) {
+  <div class="modal-backdrop" role="presentation" (click)="publishConfirmationOpen.set(false)">
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="result-publish-title" (click)="$event.stopPropagation()">
+      <button class="icon-button modal-close" type="button" aria-label="Close" (click)="publishConfirmationOpen.set(false)"><app-icon name="x" /></button>
+      <span class="modal-icon warning"><app-icon name="message-square-text" /></span>
+      <h2 id="result-publish-title">Run and publish this review?</h2>
+      <p>A fresh review will verify the current PR head, then publish only findings that still exist. Duplicate markers remain enforced.</p>
+      <div class="modal-actions"><button class="button secondary" type="button" (click)="publishConfirmationOpen.set(false)">Cancel</button><button class="button danger" type="button" (click)="publish()"><app-icon name="rocket" />Confirm publish</button></div>
+    </section>
+  </div>
+}

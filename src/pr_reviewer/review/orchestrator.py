@@ -1,5 +1,6 @@
 from bisect import bisect_left
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
@@ -441,14 +442,41 @@ class ReviewOrchestrator:
 
         return context_files
 
+    @staticmethod
+    def _notify_progress(
+        callback: Callable[[str, int, str], None] | None,
+        phase: str,
+        progress: int,
+        message: str,
+    ) -> None:
+        """Report structured progress without coupling the engine to a UI.
+
+        Progress observers are operational helpers only. A broken observer must
+        never change review findings, publishing behavior, or CLI execution.
+        """
+
+        if callback is None:
+            return
+        try:
+            callback(phase, max(0, min(progress, 100)), message)
+        except Exception:
+            return
+
     def run(
         self,
         repository: str,
         pull_number: int,
         publish: bool = True,
+        progress_callback: Callable[[str, int, str], None] | None = None,
     ) -> ReviewRunResult:
 
         run_started = time.perf_counter()
+        self._notify_progress(
+            progress_callback,
+            "discovery",
+            4,
+            "Loading pull request metadata",
+        )
 
         # --------------------------------------------------
         # 1. Pull Request metadata
@@ -471,6 +499,44 @@ class ReviewOrchestrator:
                 pull_number=pull_number,
             )
         )
+        self._notify_progress(
+            progress_callback,
+            "discovery",
+            12,
+            f"Discovered {len(changed_files)} changed files",
+        )
+
+        # Some platforms expose change metadata but not text patches. Let
+        # those providers hydrate only files that can participate in review.
+        # This preserves CONTEXT FILE != REVIEW FILE for large PRs and avoids
+        # downloading generated output, documentation, binaries, E2E suites,
+        # and low-value tooling metadata merely to prove they should be skipped.
+        if getattr(
+            self.provider,
+            "supports_deferred_patch_hydration",
+            False,
+        ) is True:
+            hydration_candidates = [
+                changed_file
+                for changed_file in changed_files
+                if changed_file.status != "removed"
+                and self.review_router.file_classifier.classify(
+                    changed_file.file_path
+                ).reviewable
+            ]
+            hydrated_files = self.provider.hydrate_changed_files(
+                repository=repository,
+                pull_number=pull_number,
+                changed_files=hydration_candidates,
+            )
+            hydrated_by_path = {
+                changed_file.file_path: changed_file
+                for changed_file in hydrated_files
+            }
+            changed_files = [
+                hydrated_by_path.get(changed_file.file_path, changed_file)
+                for changed_file in changed_files
+            ]
 
         # --------------------------------------------------
         # 3. Parse diffs
@@ -495,6 +561,12 @@ class ReviewOrchestrator:
             parsed_files
         )
         routing_elapsed = time.perf_counter() - routing_started
+        self._notify_progress(
+            progress_callback,
+            "discovery",
+            22,
+            f"Routed {len(llm_reviewable_files)} files for semantic review",
+        )
 
         print()
         print("🧭 Review routing")
@@ -608,6 +680,12 @@ class ReviewOrchestrator:
             )
         )
         discovery_elapsed = time.perf_counter() - discovery_started
+        self._notify_progress(
+            progress_callback,
+            "discovery",
+            38,
+            "Repository and project context resolved",
+        )
 
         # --------------------------------------------------
         # 6A. Repository diagnostics
@@ -633,6 +711,12 @@ class ReviewOrchestrator:
             )
         ]
         static_elapsed = time.perf_counter() - static_started
+        self._notify_progress(
+            progress_callback,
+            "static_analysis",
+            54,
+            f"Static analysis produced {len(static_findings)} findings",
+        )
 
         print(
             f"Static findings : "
@@ -676,6 +760,12 @@ class ReviewOrchestrator:
         # --------------------------------------------------
 
         llm_findings: list[Finding] = []
+        self._notify_progress(
+            progress_callback,
+            "ai_review",
+            60,
+            "Starting evidence-grounded semantic review",
+        )
 
         if self.llm_supports_batch_review:
             review_batches = self.batch_planner.plan(
@@ -768,6 +858,12 @@ class ReviewOrchestrator:
         )
 
         review_elapsed = time.perf_counter() - review_started
+        self._notify_progress(
+            progress_callback,
+            "ai_review",
+            79,
+            f"Semantic review completed with {len(llm_findings)} raw findings",
+        )
         execution_stats = self.llm_reviewer.execution_stats()
         metrics_reader = getattr(self.llm_provider, "call_metrics", None)
         raw_call_metrics = metrics_reader() if callable(metrics_reader) else ()
@@ -972,6 +1068,12 @@ class ReviewOrchestrator:
             )
         )
         processing_elapsed = time.perf_counter() - processing_started
+        self._notify_progress(
+            progress_callback,
+            "validation",
+            88,
+            f"Validated and deduplicated {len(findings)} final findings",
+        )
 
         project_counts: Counter[str] = Counter()
         for changed_file in llm_reviewable_files:
@@ -1032,6 +1134,12 @@ class ReviewOrchestrator:
                 findings
             )
         )
+        self._notify_progress(
+            progress_callback,
+            "validation",
+            92,
+            f"Quality gate decision: {quality_result.decision.value}",
+        )
 
         # --------------------------------------------------
         # 12. Build summary
@@ -1050,6 +1158,13 @@ class ReviewOrchestrator:
 
         if not publish:
 
+            self._notify_progress(
+                progress_callback,
+                "completed",
+                100,
+                "Dry review completed",
+            )
+
             return ReviewRunResult(
                 pull_request=pull_request,
                 findings=findings,
@@ -1066,6 +1181,12 @@ class ReviewOrchestrator:
         # 14. Publish inline findings
         # --------------------------------------------------
 
+        self._notify_progress(
+            progress_callback,
+            "publishing",
+            95,
+            "Publishing review comments",
+        )
         publishing_result = (
             self.publishing_service.publish_findings(
                 repository=repository,
@@ -1093,6 +1214,12 @@ class ReviewOrchestrator:
             summary_failure = f"{type(exc).__name__}: {exc}"
             print(f"   ⚠️ Review summary was not published — {exc}")
 
+        self._notify_progress(
+            progress_callback,
+            "completed",
+            100,
+            "Review and publishing completed",
+        )
         return ReviewRunResult(
             pull_request=pull_request,
             findings=findings,
