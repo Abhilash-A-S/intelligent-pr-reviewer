@@ -1,0 +1,62 @@
+<section class="page history-page">
+  <header class="page-heading heading-with-action">
+    <div><h1>Review History</h1><p>Previous pull request reviews across providers</p></div>
+    <button class="button secondary" type="button" [disabled]="loading()" (click)="load()"><app-icon name="refresh-cw" />{{ loading() ? 'Loading…' : 'Refresh' }}</button>
+  </header>
+
+  @if (error()) { <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() }}</span></div> }
+
+  <div class="metric-grid history-metrics">
+    <article class="metric-card neutral"><span class="metric-icon"><app-icon name="file-text" /></span><span><strong>{{ metrics().total }}</strong><small>Total reviews</small></span></article>
+    <article class="metric-card accent"><span class="metric-icon"><app-icon name="calendar" /></span><span><strong>{{ metrics().completed }}</strong><small>This month</small></span></article>
+    <article class="metric-card danger"><span class="metric-icon"><app-icon name="triangle-alert" /></span><span><strong>{{ metrics().blocked }}</strong><small>Blocked</small></span></article>
+    <article class="metric-card success"><span class="metric-icon"><app-icon name="circle-check" /></span><span><strong>{{ metrics().published }}</strong><small>Published</small></span></article>
+  </div>
+
+  <section class="card history-filters" aria-label="History filters">
+    <label class="search-field"><app-icon name="search" /><input type="search" placeholder="Search reviews, PR title, or author…" [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
+    <label class="select-shell"><select [ngModel]="provider()" (ngModelChange)="provider.set($event)"><option value="all">All providers</option><option value="github">GitHub</option><option value="azure-devops">Azure DevOps</option></select><app-icon name="chevron-down" /></label>
+    <label class="select-shell"><select [ngModel]="decision()" (ngModelChange)="decision.set($event)"><option value="all">All decisions</option><option value="blocked">Block merge</option><option value="changes">Request changes</option><option value="passed">Passed</option><option value="running">Running</option><option value="failed">Failed</option></select><app-icon name="chevron-down" /></label>
+    <span class="date-range"><app-icon name="calendar" />{{ historyRangeLabel() }}</span>
+    <button class="button primary export-history" type="button" [disabled]="!filteredRows().length" (click)="exportHistory()"><app-icon name="download" />Export</button>
+  </section>
+
+  <section class="card data-card history-data-card">
+    <div class="table-scroll">
+      <table class="data-table history-table">
+        <thead><tr><th>Review</th><th>Provider</th><th>Repository / PR</th><th>Author</th><th>Decision</th><th>Findings</th><th>Duration</th><th>Mode</th><th>Reviewed</th><th>Action</th></tr></thead>
+        <tbody>
+          @for (row of filteredRows(); track row.id) {
+            <tr>
+              <td><span class="history-review"><strong>{{ row.title }}</strong><small>#{{ row.pullNumber }}</small></span></td>
+              <td><span class="history-provider"><app-provider-mark [provider]="row.provider" />{{ row.provider === 'github' ? 'GitHub' : 'Azure DevOps' }}</span></td>
+              <td><span class="repository-pr"><strong>{{ row.repository }}</strong><small>#{{ row.pullNumber }}</small></span></td>
+              <td><span class="author"><span class="mini-avatar">{{ initials(row.author) }}</span>{{ row.author }}</span></td>
+              <td><span [class]="'decision-pill ' + row.decision"><span></span>{{ decisionLabel(row.decision) }}</span></td>
+              <td><strong>{{ row.findings }}</strong></td>
+              <td>{{ row.duration }}</td>
+              <td><span class="mode-pill">{{ row.mode }}</span></td>
+              <td>{{ row.created }}</td>
+              <td>@if (row.decision === 'running') { <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']">View progress</a> } @else if (row.decision !== 'failed') { <a class="button table-button" [routerLink]="['/reviews', row.id, 'results']">View Results</a> } @else { <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']">View failure</a> }</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="10"><div class="empty-state"><app-icon name="history" />@if (loading()) { <strong>Loading review history…</strong><span>Reading jobs from the current review-engine process.</span> } @else if (search() || provider() !== 'all' || decision() !== 'all') { <strong>No matching reviews</strong><span>Adjust the history filters.</span> } @else { <strong>No reviews yet</strong><span>Run a dry review or publish a review to create live history.</span> }</div></td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer"><span>Showing {{ filteredRows().length }} of {{ metrics().total }} reviews</span>@if (rows().length) { <span class="live-data-label">Current API session</span> }</footer>
+  </section>
+
+  <section class="card history-chart-card">
+    <div class="card-heading"><div><h2>Review quality trend</h2><p>Completed review decisions over the last 31 days</p></div><div class="chart-legend"><span><i class="reviews"></i>Passed</span><span><i class="blocked"></i>Blocked</span></div></div>
+    @if (rows().length) {
+      <div class="bar-chart" aria-label="Review quality trend chart">
+        @for (bar of trend(); track bar.date.getTime()) { <span class="bar-pair" [attr.title]="bar.date.toLocaleDateString() + ': ' + bar.passed + ' passed, ' + bar.blocked + ' blocked'"><i class="passed" [style.height.%]="bar.passedHeight"></i><i class="blocked" [style.height.%]="bar.blockedHeight"></i></span> }
+      </div>
+      <div class="bar-chart-labels">@for (label of trendLabels(); track label) { <span>{{ label }}</span> }</div>
+    } @else {
+      <div class="empty-state compact"><app-icon name="activity" /><strong>No trend data yet</strong><span>Completed reviews will appear here automatically.</span></div>
+    }
+  </section>
+</section>
