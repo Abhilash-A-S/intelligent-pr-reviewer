@@ -4,13 +4,17 @@ import { Observable } from 'rxjs';
 
 import {
   ChangedFileListResponse,
+  DiscoveryResponse,
   HealthResponse,
+  OrganizationSummary,
+  ProjectSummary,
   ProviderId,
   PullRequestDetail,
   PullRequestListResponse,
   ReviewCreateRequest,
   ReviewJob,
   ReviewListResponse,
+  RepositorySummary,
 } from './models';
 
 @Injectable({ providedIn: 'root' })
@@ -18,10 +22,54 @@ export class ReviewerApi {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = '/api';
 
-  health(probeOllama = true): Observable<HealthResponse> {
+  health(probeOllama = true, probeProviders = true): Observable<HealthResponse> {
     return this.http.get<HealthResponse>(`${this.baseUrl}/health`, {
-      params: { probe_ollama: probeOllama },
+      params: { probe_ollama: probeOllama, probe_providers: probeProviders },
     });
+  }
+
+  listOrganizations(
+    provider: ProviderId,
+    query = '',
+  ): Observable<DiscoveryResponse<OrganizationSummary>> {
+    let params = new HttpParams().set('provider', provider);
+    if (query.trim()) params = params.set('query', query.trim());
+    return this.http.get<DiscoveryResponse<OrganizationSummary>>(
+      `${this.baseUrl}/repository-discovery/organizations`,
+      { params },
+    );
+  }
+
+  listProjects(
+    provider: ProviderId,
+    organization: string,
+    query = '',
+  ): Observable<DiscoveryResponse<ProjectSummary>> {
+    let params = new HttpParams()
+      .set('provider', provider)
+      .set('organization', organization);
+    if (query.trim()) params = params.set('query', query.trim());
+    return this.http.get<DiscoveryResponse<ProjectSummary>>(
+      `${this.baseUrl}/repository-discovery/projects`,
+      { params },
+    );
+  }
+
+  listRepositories(
+    provider: ProviderId,
+    organization: string,
+    project?: string,
+    query = '',
+  ): Observable<DiscoveryResponse<RepositorySummary>> {
+    let params = new HttpParams()
+      .set('provider', provider)
+      .set('organization', organization);
+    if (project) params = params.set('project', project);
+    if (query.trim()) params = params.set('query', query.trim());
+    return this.http.get<DiscoveryResponse<RepositorySummary>>(
+      `${this.baseUrl}/repository-discovery/repositories`,
+      { params },
+    );
   }
 
   listPullRequests(

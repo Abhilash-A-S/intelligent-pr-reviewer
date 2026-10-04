@@ -5,8 +5,47 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'suggestion';
 export interface ProviderStatus {
   id: ProviderId;
   name: string;
+  configured: boolean;
   connected: boolean;
+  state:
+    | 'connected'
+    | 'configured'
+    | 'not-configured'
+    | 'authentication-failed'
+    | 'unavailable';
+  detail: string | null;
   repository_format: string;
+}
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+  display_name: string;
+  description?: string | null;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  organization: string;
+  description?: string | null;
+}
+
+export interface RepositorySummary {
+  id: string;
+  name: string;
+  organization: string;
+  project?: string | null;
+  full_name?: string | null;
+  description?: string | null;
+  default_branch?: string | null;
+  visibility?: string | null;
+}
+
+export interface DiscoveryResponse<T> {
+  provider: ProviderId;
+  items: T[];
+  total: number;
 }
 
 export interface HealthResponse {
@@ -84,6 +123,29 @@ export interface ReviewStep {
   state: 'pending' | 'active' | 'complete' | 'failed' | 'cancelled';
   message: string | null;
   updated_at: string | null;
+}
+
+export interface ReviewMetrics {
+  changed_files: number | null;
+  additions: number | null;
+  deletions: number | null;
+  review_files: number | null;
+  static_findings: number | null;
+  planned_llm_calls: number | null;
+  actual_llm_calls: number | null;
+}
+
+export interface ReviewEvent {
+  id: string;
+  phase: string;
+  level: 'info' | 'success' | 'warning' | 'error' | 'ai';
+  title: string;
+  detail: string;
+  timestamp: string;
+  files: string[];
+  batch_index: number | null;
+  batch_total: number | null;
+  token_count: number | null;
 }
 
 export interface ReviewFinding {
@@ -174,6 +236,8 @@ export interface ReviewJob {
     dry_run: boolean;
   } | null;
   steps: ReviewStep[];
+  metrics: ReviewMetrics;
+  events: ReviewEvent[];
 }
 
 export interface ReviewListResponse {

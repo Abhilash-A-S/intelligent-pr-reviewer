@@ -3,6 +3,7 @@ from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+import inspect
 from pathlib import PurePosixPath
 import os
 import re
@@ -453,10 +454,13 @@ class ReviewOrchestrator:
 
     @staticmethod
     def _notify_progress(
-        callback: Callable[[str, int, str], None] | None,
+        callback: Callable[..., None] | None,
         phase: str,
         progress: int,
         message: str,
+        *,
+        metrics: dict[str, int] | None = None,
+        event: dict[str, object] | None = None,
     ) -> None:
         """Report structured progress without coupling the engine to a UI.
 
@@ -466,8 +470,44 @@ class ReviewOrchestrator:
 
         if callback is None:
             return
+        details = {
+            key: value
+            for key, value in (("metrics", metrics), ("event", event))
+            if value is not None
+        }
         try:
-            callback(phase, max(0, min(progress, 100)), message)
+            signature = inspect.signature(callback)
+            parameters = tuple(signature.parameters.values())
+            accepts_keyword = (
+                "details" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters
+                )
+            )
+            accepts_positional = any(
+                parameter.kind is inspect.Parameter.VAR_POSITIONAL
+                for parameter in parameters
+            ) or sum(
+                parameter.kind
+                in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                }
+                for parameter in parameters
+            ) >= 4
+            bounded_progress = max(0, min(progress, 100))
+            if details and accepts_keyword:
+                callback(
+                    phase,
+                    bounded_progress,
+                    message,
+                    details=details,
+                )
+            elif details and accepts_positional:
+                callback(phase, bounded_progress, message, details)
+            else:
+                callback(phase, bounded_progress, message)
         except Exception:
             return
 
@@ -476,7 +516,7 @@ class ReviewOrchestrator:
         repository: str,
         pull_number: int,
         publish: bool = True,
-        progress_callback: Callable[[str, int, str], None] | None = None,
+        progress_callback: Callable[..., None] | None = None,
     ) -> ReviewRunResult:
 
         run_started = time.perf_counter()
@@ -485,6 +525,12 @@ class ReviewOrchestrator:
             "discovery",
             4,
             "Loading pull request metadata",
+            event={
+                "id": "provider-metadata",
+                "level": "info",
+                "title": "Connecting to provider",
+                "detail": "Loading current pull-request metadata.",
+            },
         )
 
         # --------------------------------------------------
@@ -511,10 +557,18 @@ class ReviewOrchestrator:
         self._notify_progress(
             progress_callback,
             "discovery",
-            12,
-            f"Discovered {len(changed_files)} changed files",
+            8,
+            "Pull request metadata loaded",
+            event={
+                "id": "repository-discovered",
+                "level": "success",
+                "title": "Repository discovered",
+                "detail": (
+                    f"{pull_request.repository} · "
+                    f"{pull_request.head_branch} → {pull_request.base_branch}"
+                ),
+            },
         )
-
         # Some platforms expose change metadata but not text patches. Let
         # those providers hydrate only files that can participate in review.
         # This preserves CONTEXT FILE != REVIEW FILE for large PRs and avoids
@@ -557,6 +611,41 @@ class ReviewOrchestrator:
             )
             for changed_file in changed_files
         ]
+        additions = 0
+        deletions = 0
+        diff_statistics_known = all(
+            changed_file.patch is not None for changed_file in changed_files
+        )
+        for changed_file in changed_files:
+            if changed_file.patch is None:
+                continue
+            for line in changed_file.patch.splitlines():
+                if line.startswith(("+++", "---")):
+                    continue
+                if line.startswith("+"):
+                    additions += 1
+                elif line.startswith("-"):
+                    deletions += 1
+        changed_metrics = {"changed_files": len(parsed_files)}
+        change_detail = f"{len(parsed_files)} files"
+        if diff_statistics_known:
+            changed_metrics.update(
+                {"additions": additions, "deletions": deletions}
+            )
+            change_detail += f" · +{additions} / −{deletions}"
+        self._notify_progress(
+            progress_callback,
+            "discovery",
+            12,
+            f"Discovered {len(parsed_files)} changed files",
+            metrics=changed_metrics,
+            event={
+                "id": "changed-files",
+                "level": "success",
+                "title": "Changed files detected",
+                "detail": change_detail,
+            },
+        )
 
         # --------------------------------------------------
         # 4. Determine semantic review routes
@@ -575,6 +664,16 @@ class ReviewOrchestrator:
             "discovery",
             22,
             f"Routed {len(llm_reviewable_files)} files for semantic review",
+            metrics={"review_files": len(llm_reviewable_files)},
+            event={
+                "id": "review-routing",
+                "level": "info",
+                "title": "Review eligibility resolved",
+                "detail": (
+                    f"{len(llm_reviewable_files)} review files · "
+                    f"{len(skipped_llm_routes)} context-only or skipped"
+                ),
+            },
         )
 
         print()
@@ -694,6 +793,15 @@ class ReviewOrchestrator:
             "discovery",
             38,
             "Repository and project context resolved",
+            event={
+                "id": "repository-context",
+                "level": "success",
+                "title": "Repository context resolved",
+                "detail": (
+                    f"{repository_context.workspace} workspace · "
+                    f"{len(repository_context.projects)} project(s)"
+                ),
+            },
         )
 
         # --------------------------------------------------
@@ -720,11 +828,25 @@ class ReviewOrchestrator:
             )
         ]
         static_elapsed = time.perf_counter() - static_started
+        static_severity_counts = Counter(
+            finding.severity.value for finding in static_findings
+        )
+        severity_detail = ", ".join(
+            f"{severity} {count}"
+            for severity, count in static_severity_counts.items()
+        ) or "No deterministic findings"
         self._notify_progress(
             progress_callback,
             "static_analysis",
             54,
             f"Static analysis produced {len(static_findings)} findings",
+            metrics={"static_findings": len(static_findings)},
+            event={
+                "id": "static-analysis",
+                "level": "success",
+                "title": "Static analysis complete",
+                "detail": f"{len(static_findings)} findings · {severity_detail}",
+            },
         )
 
         print(
@@ -769,12 +891,6 @@ class ReviewOrchestrator:
         # --------------------------------------------------
 
         llm_findings: list[Finding] = []
-        self._notify_progress(
-            progress_callback,
-            "ai_review",
-            60,
-            "Starting evidence-grounded semantic review",
-        )
 
         if self.llm_supports_batch_review:
             review_batches = self.batch_planner.plan(
@@ -791,6 +907,28 @@ class ReviewOrchestrator:
             if len(batch.files) > 1
             else self.llm_reviewer.review_planner.plan(batch.files[0]).llm_call_count
             for batch in review_batches
+        )
+        self._notify_progress(
+            progress_callback,
+            "ai_review",
+            60,
+            "Starting evidence-grounded semantic review",
+            metrics={
+                "review_files": len(llm_reviewable_files),
+                "planned_llm_calls": planned_llm_calls,
+                "actual_llm_calls": 0,
+            },
+            event={
+                "id": "ai-review-plan",
+                "level": "ai",
+                "title": "Starting AI semantic review",
+                "detail": (
+                    f"{len(review_batches)} batch(es) · "
+                    f"{len(llm_reviewable_files)} files · "
+                    f"{planned_llm_calls} planned call(s)"
+                ),
+                "batch_total": len(review_batches),
+            },
         )
 
         print()
@@ -814,6 +952,32 @@ class ReviewOrchestrator:
         review_started = time.perf_counter()
 
         def review_one(index: int, batch):
+            batch_files = [file.file_path for file in batch.files]
+            estimated_tokens = sum(
+                self.llm_reviewer.review_planner.estimate_changed_tokens(file)
+                for file in batch.files
+            )
+            self._notify_progress(
+                progress_callback,
+                "ai_review",
+                60
+                + round(
+                    16 * max(0, batch.index - 1) / max(1, len(review_batches))
+                ),
+                f"Reviewing batch {batch.index} of {len(review_batches)}",
+                event={
+                    "id": f"ai-batch-{batch.index}",
+                    "level": "ai",
+                    "title": (
+                        f"Reviewing batch {batch.index}/{len(review_batches)}"
+                    ),
+                    "detail": f"Analyzing {len(batch.files)} file(s)",
+                    "files": batch_files,
+                    "batch_index": batch.index,
+                    "batch_total": len(review_batches),
+                    "token_count": estimated_tokens,
+                },
+            )
             if len(batch.files) > 1:
                 print()
                 print(
@@ -829,6 +993,27 @@ class ReviewOrchestrator:
                     changed_file=batch.files[0],
                     repository_context=repository_context,
                 )
+            self._notify_progress(
+                progress_callback,
+                "ai_review",
+                60 + round(17 * batch.index / max(1, len(review_batches))),
+                f"Completed batch {batch.index} of {len(review_batches)}",
+                event={
+                    "id": f"ai-batch-{batch.index}",
+                    "level": "success",
+                    "title": (
+                        f"Batch {batch.index}/{len(review_batches)} complete"
+                    ),
+                    "detail": (
+                        f"{len(batch.files)} file(s) · "
+                        f"{len(findings)} raw finding(s)"
+                    ),
+                    "files": batch_files,
+                    "batch_index": batch.index,
+                    "batch_total": len(review_batches),
+                    "token_count": estimated_tokens,
+                },
+            )
             return index, findings
 
         ordered_results: dict[int, list[Finding]] = {}
@@ -867,12 +1052,6 @@ class ReviewOrchestrator:
         )
 
         review_elapsed = time.perf_counter() - review_started
-        self._notify_progress(
-            progress_callback,
-            "ai_review",
-            79,
-            f"Semantic review completed with {len(llm_findings)} raw findings",
-        )
         execution_stats = self.llm_reviewer.execution_stats()
         metrics_reader = getattr(self.llm_provider, "call_metrics", None)
         raw_call_metrics = metrics_reader() if callable(metrics_reader) else ()
@@ -880,6 +1059,29 @@ class ReviewOrchestrator:
             tuple(raw_call_metrics)
             if isinstance(raw_call_metrics, (list, tuple))
             else ()
+        )
+        generated_tokens = sum(metric.generated_tokens for metric in call_metrics)
+        self._notify_progress(
+            progress_callback,
+            "ai_review",
+            79,
+            f"Semantic review completed with {len(llm_findings)} raw findings",
+            metrics={
+                "planned_llm_calls": planned_llm_calls,
+                "actual_llm_calls": execution_stats.actual_calls,
+            },
+            event={
+                "id": "ai-review-complete",
+                "level": "success",
+                "title": "AI semantic review complete",
+                "detail": (
+                    f"{execution_stats.actual_calls} call(s) · "
+                    f"{generated_tokens} generated token(s) · "
+                    f"{len(llm_findings)} raw finding(s)"
+                ),
+                "token_count": generated_tokens,
+                "batch_total": len(review_batches),
+            },
         )
         print()
         print("⚡ AI review performance")
@@ -1082,6 +1284,15 @@ class ReviewOrchestrator:
             "validation",
             88,
             f"Validated and deduplicated {len(findings)} final findings",
+            event={
+                "id": "findings-validated",
+                "level": "success",
+                "title": "Findings validated",
+                "detail": (
+                    f"{len(raw_findings)} raw · {len(findings)} final "
+                    "after evidence checks and deduplication"
+                ),
+            },
         )
 
         project_counts: Counter[str] = Counter()
@@ -1148,6 +1359,16 @@ class ReviewOrchestrator:
             "validation",
             92,
             f"Quality gate decision: {quality_result.decision.value}",
+            event={
+                "id": "quality-gate",
+                "level": (
+                    "success"
+                    if quality_result.decision.value == "pass"
+                    else "warning"
+                ),
+                "title": "Quality gate evaluated",
+                "detail": quality_result.decision.value.replace("_", " ").title(),
+            },
         )
 
         # --------------------------------------------------
@@ -1195,6 +1416,12 @@ class ReviewOrchestrator:
             "publishing",
             95,
             "Publishing review comments",
+            event={
+                "id": "publishing-comments",
+                "level": "info",
+                "title": "Publishing review comments",
+                "detail": f"Preparing {len(findings)} validated finding(s).",
+            },
         )
         publishing_result = (
             self.publishing_service.publish_findings(

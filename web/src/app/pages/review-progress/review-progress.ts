@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ViewEncapsulation,
   computed,
   inject,
   signal,
@@ -11,13 +12,16 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { catchError, EMPTY, interval, switchMap, takeWhile, tap, timer } from 'rxjs';
 
 import { ReviewerApi } from '../../core/api.service';
-import { ReviewJob } from '../../core/models';
+import { ReviewEvent, ReviewJob, ReviewStep } from '../../core/models';
 import { Icon } from '../../shared/icon';
+import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 
 @Component({
   selector: 'app-review-progress-page',
-  imports: [RouterLink, Icon],
+  imports: [RouterLink, Icon, SmartSelect],
   templateUrl: './review-progress.html',
+  styleUrl: './review-progress.scss',
+  encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ReviewProgressPage {
@@ -32,6 +36,33 @@ export class ReviewProgressPage {
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
   readonly cancelling = signal(false);
+  readonly diagnosticFilter = signal('all');
+  readonly diagnosticOptions: SmartSelectOption[] = [
+    { value: 'all', label: 'All logs' },
+    { value: 'discovery', label: 'Repository' },
+    { value: 'static_analysis', label: 'Static analysis' },
+    { value: 'ai_review', label: 'AI review' },
+    { value: 'validation', label: 'Validation' },
+    { value: 'publishing', label: 'Publishing' },
+  ];
+  readonly activityRingCircumference = 56.55;
+
+  readonly activitySteps = computed(() => {
+    const activityKeys = new Set([
+      'discovery',
+      'static_analysis',
+      'ai_review',
+      'validation',
+      'publishing',
+    ]);
+    return (this.job()?.steps ?? []).filter((step) => activityKeys.has(step.key));
+  });
+
+  readonly diagnosticEvents = computed(() => {
+    const selected = this.diagnosticFilter();
+    const events = this.job()?.events ?? [];
+    return selected === 'all' ? events : events.filter((event) => event.phase === selected);
+  });
 
   readonly elapsedSeconds = computed(() => {
     const job = this.job();
@@ -117,33 +148,122 @@ export class ReviewProgressPage {
     return 'circle-dot';
   }
 
+  changedFileCount(): number | string {
+    const job = this.job();
+    return job?.metrics?.changed_files ?? job?.result?.diagnostics.changed_files ?? 'Waiting';
+  }
+
+  reviewFileCount(): number | string {
+    const job = this.job();
+    return job?.metrics?.review_files ?? job?.result?.diagnostics.ai_review_files ?? 'Waiting';
+  }
+
   staticFindingCount(): number | string {
     const job = this.job();
-    if (!job) return '—';
+    if (!job) return 'Waiting';
+    if (job.metrics?.static_findings !== null && job.metrics?.static_findings !== undefined) {
+      return job.metrics.static_findings;
+    }
     const diagnostics = job.result?.diagnostics;
     if (diagnostics) {
       return Math.max(0, job.result!.findings.length - diagnostics.final_ai_findings);
     }
     const staticStep = job.steps.find((step) => step.key === 'static_analysis');
     const match = staticStep?.message?.match(/\d+/);
-    return match ? Number(match[0]) : '—';
+    return match ? Number(match[0]) : 'Waiting';
   }
 
-  diagnosticTime(index: number): string {
+  llmCallCount(): string {
     const job = this.job();
-    if (!job) return '—';
-    const step = job.steps[index];
-    const timestamp = step?.updated_at ?? (index === 0 ? job.started_at : null);
+    const planned = job?.metrics?.planned_llm_calls ?? job?.result?.diagnostics.planned_llm_calls;
+    const actual = job?.metrics?.actual_llm_calls ?? job?.result?.diagnostics.actual_llm_calls;
+    if (planned === null || planned === undefined) return 'Waiting';
+    return `${actual ?? 0} / ${planned}`;
+  }
+
+  diagnosticTime(event: ReviewEvent): string {
+    const timestamp = event.timestamp;
     return timestamp
       ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      : '—';
+      : 'Waiting';
   }
 
-  statusMessage(state: string): string {
-    if (state === 'complete') return 'Completed successfully';
-    if (state === 'active') return 'In progress';
-    if (state === 'failed') return 'Review stage failed';
-    if (state === 'cancelled') return 'Cancelled';
-    return 'Waiting';
+  setDiagnosticFilter(value: string): void {
+    const allowed = new Set(this.diagnosticOptions.map((option) => option.value));
+    if (allowed.has(value)) this.diagnosticFilter.set(value);
+  }
+
+  activityTitle(step: ReviewStep): string {
+    const labels: Record<string, string> = {
+      discovery: 'Repository analysis',
+      static_analysis: 'Static analysis',
+      ai_review: 'AI semantic review',
+      validation: 'Validation and deduplication',
+      publishing: 'Publishing review comments',
+    };
+    const event = this.latestPhaseEvent(step.key);
+    if (step.key === 'ai_review' && event?.batch_index && event.batch_total) {
+      return `${labels[step.key]} · Batch ${event.batch_index}/${event.batch_total}`;
+    }
+    return labels[step.key] ?? step.label;
+  }
+
+  activityMessage(step: ReviewStep): string {
+    const event = this.latestPhaseEvent(step.key);
+    if (event?.detail) return event.detail;
+    if (step.state === 'complete') return 'Completed successfully';
+    if (step.state === 'active') return step.message ?? this.job()?.message ?? 'In progress';
+    if (step.state === 'failed') return 'Review stage failed';
+    if (step.state === 'cancelled') return 'Cancelled';
+    return 'Pending';
+  }
+
+  activityFiles(step: ReviewStep): string[] {
+    return this.latestPhaseEvent(step.key)?.files ?? [];
+  }
+
+  activityProgress(step: ReviewStep): number {
+    if (step.state === 'complete') return 100;
+    if (step.state !== 'active') return 0;
+    const event = this.latestPhaseEvent(step.key);
+    if (event?.batch_index && event.batch_total) {
+      return Math.min(100, Math.max(0, (event.batch_index / event.batch_total) * 100));
+    }
+    return Math.min(96, Math.max(8, this.job()?.progress ?? 0));
+  }
+
+  activityRingOffset(step: ReviewStep): number {
+    return this.activityRingCircumference * (1 - this.activityProgress(step) / 100);
+  }
+
+  activityTime(step: ReviewStep): string {
+    if (step.state === 'pending') return 'Pending';
+    if (step.state === 'active') return 'In progress';
+    if (step.state === 'failed') return 'Failed';
+    if (step.state === 'cancelled') return 'Cancelled';
+    return this.relativeTime(step.updated_at);
+  }
+
+  diagnosticIcon(event: ReviewEvent): string {
+    if (event.level === 'error') return 'x';
+    if (event.phase === 'ai_review') return 'bot';
+    if (event.phase === 'static_analysis') return 'shield-check';
+    if (event.phase === 'publishing') return 'message-square-text';
+    if (event.phase === 'validation' || event.phase === 'completed') return 'check';
+    if (event.phase === 'discovery') return 'database';
+    return 'activity';
+  }
+
+  private latestPhaseEvent(phase: string): ReviewEvent | undefined {
+    return [...(this.job()?.events ?? [])].reverse().find((event) => event.phase === phase);
+  }
+
+  private relativeTime(value: string | null): string {
+    if (!value) return 'Done';
+    const seconds = Math.max(0, Math.floor((this.clock() - new Date(value).getTime()) / 1000));
+    if (seconds < 10) return 'Just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`;
   }
 }

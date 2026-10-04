@@ -7,6 +7,59 @@ from pr_reviewer.providers.github import GitHubProvider
 from pr_reviewer.providers.models import PullRequestSummary
 
 
+def github_response(payload):
+    response = Mock()
+    response.json.return_value = payload
+    response.raise_for_status.return_value = None
+    return response
+
+
+def test_repository_discovery_lists_viewer_organizations_and_repositories():
+    client = Mock()
+    client.get.side_effect = [
+        github_response({"id": 1, "login": "octocat", "name": "Octo Cat"}),
+        github_response([{"id": 2, "login": "acme"}]),
+        github_response(
+            [
+                {
+                    "id": 7,
+                    "name": "reviewer",
+                    "full_name": "acme/reviewer",
+                    "description": "Review service",
+                    "default_branch": "main",
+                    "visibility": "private",
+                }
+            ]
+        ),
+    ]
+    provider = GitHubProvider(client=client)
+
+    organizations = provider.list_organizations()
+    repositories = provider.list_repositories("acme")
+
+    assert [item.name for item in organizations] == ["acme", "octocat"]
+    assert organizations[1].display_name == "Octo Cat"
+    assert repositories[0].full_name == "acme/reviewer"
+    assert repositories[0].visibility == "private"
+    assert client.get.call_args_list[2].args[0] == "/orgs/acme/repos"
+
+
+def test_github_viewer_repository_discovery_uses_owner_affiliation():
+    client = Mock()
+    client.get.side_effect = [
+        github_response({"id": 1, "login": "octocat"}),
+        github_response([]),
+    ]
+    provider = GitHubProvider(client=client)
+
+    assert provider.list_repositories("OctoCat") == []
+
+    call = client.get.call_args_list[1]
+    assert call.args[0] == "/user/repos"
+    assert call.kwargs["params"]["affiliation"] == "owner"
+    assert call.kwargs["params"]["visibility"] == "all"
+
+
 @patch("pr_reviewer.providers.github.httpx.Client")
 def test_get_pull_request(mock_client_class):
     mock_client = Mock()

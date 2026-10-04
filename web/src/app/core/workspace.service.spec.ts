@@ -41,8 +41,7 @@ describe('WorkspaceService live data', () => {
     http
       .expectOne(
         (request) =>
-          request.url === '/api/pull-requests' &&
-          request.params.get('repository') === 'acme/store',
+          request.url === '/api/pull-requests' && request.params.get('repository') === 'acme/store',
       )
       .flush({
         provider: 'github',
@@ -106,7 +105,89 @@ describe('WorkspaceService live data', () => {
 
     service.setProvider('azure-devops');
 
+    http
+      .expectOne(
+        (request) =>
+          request.url === '/api/repository-discovery/organizations' &&
+          request.params.get('provider') === 'azure-devops',
+      )
+      .flush({ provider: 'azure-devops', items: [], total: 0 });
+
     expect(service.pullRequests()).toEqual([]);
     expect(service.loaded()).toBeFalse();
+    expect(service.organization()).toBe('');
+    expect(service.repositoryName()).toBe('');
+  });
+
+  it('discovers GitHub accounts and repositories before loading pull requests', () => {
+    service.ensureDiscoveryLoaded();
+    http
+      .expectOne(
+        (request) =>
+          request.url === '/api/repository-discovery/organizations' &&
+          request.params.get('provider') === 'github',
+      )
+      .flush({
+        provider: 'github',
+        total: 1,
+        items: [{ id: '1', name: 'acme', display_name: 'Acme' }],
+      });
+
+    service.selectOrganization('acme');
+    http
+      .expectOne(
+        (request) =>
+          request.url === '/api/repository-discovery/repositories' &&
+          request.params.get('organization') === 'acme' &&
+          !request.params.has('project'),
+      )
+      .flush({
+        provider: 'github',
+        total: 1,
+        items: [
+          {
+            id: 'repo-1',
+            name: 'store',
+            organization: 'acme',
+            full_name: 'acme/store',
+            visibility: 'private',
+          },
+        ],
+      });
+    service.selectRepository('store');
+
+    expect(service.organizations()[0].display_name).toBe('Acme');
+    expect(service.repositories()[0].visibility).toBe('private');
+    expect(service.repository()).toBe('acme/store');
+    expect(service.hasRepositorySelection()).toBeTrue();
+  });
+
+  it('keeps manual selection available when discovery is forbidden', () => {
+    service.ensureDiscoveryLoaded();
+    http
+      .expectOne(
+        (request) =>
+          request.url === '/api/repository-discovery/organizations' &&
+          request.params.get('provider') === 'github' &&
+          !request.params.has('query'),
+      )
+      .flush(
+        { detail: 'Token cannot list organizations.' },
+        { status: 403, statusText: 'Forbidden' },
+      );
+
+    expect(service.discoveryError()).toContain('enter the value manually');
+
+    service.selectOrganization('manual-owner');
+    http
+      .expectOne(
+        (request) =>
+          request.url === '/api/repository-discovery/repositories' &&
+          request.params.get('organization') === 'manual-owner',
+      )
+      .flush({ provider: 'github', items: [], total: 0 });
+    service.selectRepository('manual-repository');
+
+    expect(service.repository()).toBe('manual-owner/manual-repository');
   });
 });

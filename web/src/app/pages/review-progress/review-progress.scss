@@ -1,0 +1,234 @@
+/* Review progress — Figma reference alignment ---------------------------- */
+.review-progress-page {
+  width: 100%;
+  max-width: 1280px;
+  font-family: Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12px;
+}
+
+.review-progress-page .page-heading h1 {
+  font-size: 24px;
+  font-weight: 760;
+  line-height: 1.18;
+}
+
+.review-progress-page .card-heading h2 {
+  font-size: 13px;
+  font-weight: 740;
+  letter-spacing: -0.012em;
+}
+
+/* Current activity */
+.review-progress-page .progress-detail-grid {
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+  gap: 16px;
+}
+
+.review-progress-page .activity-panel,
+.review-progress-page .diagnostics-panel {
+  min-height: 390px;
+  padding: 17px;
+}
+
+.review-progress-page .activity-list {
+  gap: 0;
+  margin-top: 12px;
+  overflow: visible;
+}
+
+.review-progress-page .activity-list > li {
+  position: relative;
+  min-height: 60px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.review-progress-page .activity-list > li:not(:last-child)::after {
+  position: absolute;
+  z-index: 0;
+  top: 37px;
+  bottom: -13px;
+  left: 22px;
+  width: 1px;
+  background: var(--border);
+  content: '';
+}
+
+.review-progress-page .activity-list > li.active {
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+}
+
+.review-progress-page .activity-state {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.review-progress-page .complete .activity-state {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.review-progress-page .active .activity-state {
+  border: 0;
+  background: transparent;
+}
+
+.activity-progress-ring {
+  width: 26px;
+  height: 26px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.activity-progress-track,
+.activity-progress-value {
+  fill: none;
+  stroke-width: 3;
+}
+
+.activity-progress-track {
+  stroke: color-mix(in srgb, var(--accent) 17%, var(--surface));
+}
+
+.activity-progress-value {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 300ms ease;
+}
+
+.review-progress-page .activity-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.activity-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-progress-page .activity-title-row strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-progress-page .activity-title-row em {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 8.5px;
+  font-style: normal;
+}
+
+.review-progress-page .activity-list > li.active .activity-title-row em {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.review-progress-page .activity-content > small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.review-progress-page .activity-files {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 1px;
+  padding: 0;
+  list-style: none;
+}
+
+.review-progress-page .activity-files li {
+  display: grid;
+  min-height: 19px;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.review-progress-page .activity-files .app-icon {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.review-progress-page .activity-files code {
+  overflow: hidden;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+@media (max-width: 760px) {
+  .review-progress-page { padding-inline: 13px; }
+}
+
+/* Final precedence for the active review timeline. */
+.review-progress-page .progress-detail-grid {
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+}
+.review-progress-page .activity-list > li {
+  position: relative;
+  min-height: 60px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px 9px;
+}
+.review-progress-page .activity-list > li.active {
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+}
+.review-progress-page .activity-files {
+  display: grid;
+  gap: 4px;
+}
+.review-progress-page .activity-files li {
+  display: grid;
+  min-height: 19px;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.review-progress-page .activity-files code {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+@media (max-width: 760px) {
+  .review-progress-page .progress-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

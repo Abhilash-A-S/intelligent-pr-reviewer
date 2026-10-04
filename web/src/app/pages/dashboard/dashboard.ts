@@ -6,10 +6,11 @@ import { ProviderId, PullRequestSummary } from '../../core/models';
 import { WorkspaceService } from '../../core/workspace.service';
 import { Icon } from '../../shared/icon';
 import { ProviderMark } from '../../shared/provider-mark';
+import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 
 @Component({
   selector: 'app-dashboard-page',
-  imports: [FormsModule, RouterLink, Icon, ProviderMark],
+  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect],
   templateUrl: './dashboard.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -17,6 +18,47 @@ export class DashboardPage {
   readonly workspace = inject(WorkspaceService);
   readonly search = signal('');
   readonly statusFilter = signal<'all' | 'awaiting' | 'blocked' | 'passed'>('all');
+
+  readonly organizationOptions = computed<SmartSelectOption[]>(() =>
+    this.workspace.organizations().map((organization) => ({
+      value: organization.name,
+      label: organization.display_name || organization.name,
+      description:
+        organization.description ||
+        (organization.display_name !== organization.name ? organization.name : undefined),
+      searchText: `${organization.id} ${organization.name}`,
+    })),
+  );
+
+  readonly projectOptions = computed<SmartSelectOption[]>(() =>
+    this.workspace.projects().map((project) => ({
+      value: project.name,
+      label: project.name,
+      description: project.description ?? undefined,
+      searchText: project.id,
+    })),
+  );
+
+  readonly repositoryOptions = computed<SmartSelectOption[]>(() =>
+    this.workspace.repositories().map((repository) => ({
+      value: repository.name,
+      label: repository.name,
+      description:
+        [repository.visibility, repository.default_branch?.replace(/^refs\/heads\//, '')]
+          .filter(Boolean)
+          .join(' · ') ||
+        repository.description ||
+        undefined,
+      searchText: `${repository.id} ${repository.full_name ?? ''} ${repository.description ?? ''}`,
+    })),
+  );
+
+  readonly statusOptions: SmartSelectOption[] = [
+    { value: 'all', label: 'All statuses' },
+    { value: 'awaiting', label: 'Awaiting review' },
+    { value: 'blocked', label: 'Blocked' },
+    { value: 'passed', label: 'Passed' },
+  ];
 
   readonly filteredPullRequests = computed(() => {
     const term = this.search().trim().toLowerCase();
@@ -45,8 +87,25 @@ export class DashboardPage {
     };
   });
 
+  constructor() {
+    this.workspace.ensureDiscoveryLoaded();
+  }
+
   setProvider(provider: ProviderId): void {
+    this.search.set('');
+    this.statusFilter.set('all');
     this.workspace.setProvider(provider);
+  }
+
+  clearFilters(): void {
+    this.search.set('');
+    this.statusFilter.set('all');
+  }
+
+  setStatusFilter(value: string): void {
+    if (['all', 'awaiting', 'blocked', 'passed'].includes(value)) {
+      this.statusFilter.set(value as 'all' | 'awaiting' | 'blocked' | 'passed');
+    }
   }
 
   initials(author: string): string {

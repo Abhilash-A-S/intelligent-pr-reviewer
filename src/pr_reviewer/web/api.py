@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import os
 from pathlib import Path
 from typing import Annotated, Literal
@@ -39,21 +40,73 @@ def _configured_origins() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _provider_status() -> list[dict]:
-    return [
+def _provider_probe(name: str) -> tuple[bool, str, str | None]:
+    try:
+        adapter = create_pull_request_provider(name)
+        adapter.validate_connection()
+        return True, "connected", None
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code in {401, 403}:
+            return (
+                False,
+                "authentication-failed",
+                "Authentication failed. Verify the credential and its provider permissions.",
+            )
+        return (
+            False,
+            "unavailable",
+            f"Provider validation returned HTTP {status_code}.",
+        )
+    except Exception:
+        return (
+            False,
+            "unavailable",
+            "The provider could not be validated. Check its configuration and availability.",
+        )
+
+
+def _provider_status(*, probe: bool = False) -> list[dict]:
+    definitions = (
+        ("github", "GitHub", "GITHUB_TOKEN", "owner/repository"),
+        (
+            "azure-devops",
+            "Azure DevOps",
+            "AZURE_DEVOPS_PAT",
+            "organization/project/repository",
+        ),
+    )
+    statuses = [
         {
-            "id": "github",
-            "name": "GitHub",
-            "connected": bool(os.getenv("GITHUB_TOKEN")),
-            "repository_format": "owner/repository",
-        },
-        {
-            "id": "azure-devops",
-            "name": "Azure DevOps",
-            "connected": bool(os.getenv("AZURE_DEVOPS_PAT")),
-            "repository_format": "organization/project/repository",
-        },
+            "id": provider_id,
+            "name": name,
+            "configured": bool(os.getenv(env_name)),
+            "connected": bool(os.getenv(env_name)),
+            "state": "configured" if os.getenv(env_name) else "not-configured",
+            "detail": None,
+            "repository_format": repository_format,
+        }
+        for provider_id, name, env_name, repository_format in definitions
     ]
+    if not probe:
+        return statuses
+
+    configured = [item for item in statuses if item["configured"]]
+    if configured:
+        with ThreadPoolExecutor(max_workers=len(configured)) as executor:
+            probes = {
+                item["id"]: future
+                for item, future in (
+                    (item, executor.submit(_provider_probe, item["id"]))
+                    for item in configured
+                )
+            }
+            for item in configured:
+                connected, state, detail = probes[item["id"]].result()
+                item["connected"] = connected
+                item["state"] = state
+                item["detail"] = detail
+    return statuses
 
 
 def _ollama_status(probe: bool) -> dict:
@@ -99,11 +152,54 @@ def _provider_or_http_error(name: str):
 def _provider_failure(exc: Exception) -> HTTPException:
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
-        if code in {401, 403, 404, 422}:
+        if code == 401:
+            return HTTPException(
+                status_code=code,
+                detail="Provider authentication failed. Verify that the token is valid and unexpired.",
+            )
+        if code == 403:
+            return HTTPException(
+                status_code=code,
+                detail="Provider access was denied. Verify repository and pull-request permissions.",
+            )
+        if code in {404, 422}:
             return HTTPException(status_code=code, detail=str(exc))
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=502, detail=f"Provider request failed: {exc}")
+
+
+def _pull_request_summaries_with_counts(
+    adapter,
+    repository: str,
+    items: list,
+) -> list:
+    """Enrich a bounded dashboard page without downloading full patches."""
+
+    try:
+        configured_limit = int(os.getenv("PR_REVIEW_UI_FILE_COUNT_LIMIT", "30"))
+    except ValueError:
+        configured_limit = 30
+    limit = max(0, min(configured_limit, 100))
+    candidates = items[:limit]
+    if not candidates:
+        return items
+
+    def resolve(item):
+        if item.changed_files is not None:
+            return item
+        try:
+            value = adapter.get_changed_file_count(repository, item.number)
+        except Exception:
+            return item
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return item
+        return replace(item, changed_files=value)
+
+    workers = min(8, len(candidates))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        enriched = list(executor.map(resolve, candidates))
+    return [*enriched, *items[limit:]]
 
 
 def _diff_counts(patch: str | None) -> tuple[int | None, int | None]:
@@ -120,6 +216,33 @@ def _diff_counts(patch: str | None) -> tuple[int | None, int | None]:
         elif line.startswith("-"):
             deletions += 1
     return additions, deletions
+
+
+def _discovery_payload(
+    provider: str,
+    items: list,
+    query: str,
+    limit: int,
+) -> dict:
+    serialized = [asdict(item) for item in items]
+    term = query.strip().casefold()
+    if term:
+        serialized = [
+            item
+            for item in serialized
+            if term
+            in " ".join(
+                str(value)
+                for value in item.values()
+                if value is not None
+            ).casefold()
+        ]
+    total = len(serialized)
+    return {
+        "provider": normalize_provider_name(provider),
+        "items": serialized[:limit],
+        "total": total,
+    }
 
 
 def _ui_static_root() -> Path:
@@ -158,7 +281,10 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
     )
 
     @app.get("/api/health")
-    def health(probe_ollama: bool = False) -> dict:
+    def health(
+        probe_ollama: bool = False,
+        probe_providers: bool = False,
+    ) -> dict:
         try:
             max_inline_comments = int(
                 os.getenv("PR_REVIEW_MAX_INLINE_COMMENTS", "40")
@@ -168,7 +294,7 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         return {
             "status": "ok",
             "version": __version__,
-            "providers": _provider_status(),
+            "providers": _provider_status(probe=probe_providers),
             "ollama": _ollama_status(probe_ollama),
             "review_policy": {
                 "max_inline_comments": max(0, min(max_inline_comments, 200)),
@@ -182,6 +308,48 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
     def providers() -> dict:
         return {"items": _provider_status()}
 
+    @app.get("/api/repository-discovery/organizations")
+    def discover_organizations(
+        provider: str,
+        query: Annotated[str, Query(max_length=200)] = "",
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> dict:
+        adapter = _provider_or_http_error(provider)
+        try:
+            items = adapter.list_organizations()
+        except Exception as exc:
+            raise _provider_failure(exc) from exc
+        return _discovery_payload(provider, items, query, limit)
+
+    @app.get("/api/repository-discovery/projects")
+    def discover_projects(
+        provider: str,
+        organization: Annotated[str, Query(min_length=1, max_length=200)],
+        query: Annotated[str, Query(max_length=200)] = "",
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> dict:
+        adapter = _provider_or_http_error(provider)
+        try:
+            items = adapter.list_projects(organization)
+        except Exception as exc:
+            raise _provider_failure(exc) from exc
+        return _discovery_payload(provider, items, query, limit)
+
+    @app.get("/api/repository-discovery/repositories")
+    def discover_repositories(
+        provider: str,
+        organization: Annotated[str, Query(min_length=1, max_length=200)],
+        project: Annotated[str | None, Query(max_length=200)] = None,
+        query: Annotated[str, Query(max_length=200)] = "",
+        limit: Annotated[int, Query(ge=1, le=500)] = 300,
+    ) -> dict:
+        adapter = _provider_or_http_error(provider)
+        try:
+            items = adapter.list_repositories(organization, project)
+        except Exception as exc:
+            raise _provider_failure(exc) from exc
+        return _discovery_payload(provider, items, query, limit)
+
     @app.get("/api/pull-requests")
     def pull_requests(
         provider: str,
@@ -191,6 +359,11 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         adapter = _provider_or_http_error(provider)
         try:
             items = adapter.list_pull_requests(repository, state=state)
+            items = _pull_request_summaries_with_counts(
+                adapter,
+                repository,
+                items,
+            )
         except Exception as exc:
             raise _provider_failure(exc) from exc
         return {

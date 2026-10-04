@@ -19,3 +19,7 @@ from the repository root with `uv run intelligent-pr-reviewer-api`.
 
 The browser stores only non-sensitive workspace and review preferences.
 Provider tokens, PATs and Ollama connectivity stay behind FastAPI.
+
+Repository selection uses the provider-neutral discovery API. All selector
+panels are custom, keyboard-accessible, searchable where useful, and include a
+manual-value fallback for restricted GitHub or Azure DevOps tokens.

@@ -5,7 +5,11 @@ import httpx
 from dotenv import load_dotenv
 
 from pr_reviewer.providers.base import PullRequestProvider
-from pr_reviewer.providers.models import PullRequestSummary
+from pr_reviewer.providers.models import (
+    OrganizationSummary,
+    PullRequestSummary,
+    RepositorySummary,
+)
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 load_dotenv()
@@ -15,6 +19,7 @@ class GitHubProvider(PullRequestProvider):
     BASE_URL = "https://api.github.com"
     supports_batch_inline_comments = True
     supports_pull_request_listing = True
+    supports_repository_discovery = True
     provider_name = "github"
     display_name = "GitHub"
 
@@ -57,6 +62,7 @@ class GitHubProvider(PullRequestProvider):
         token: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
+        self._viewer_data: dict | None = None
         if client is not None:
             self.client = client
             return
@@ -77,6 +83,118 @@ class GitHubProvider(PullRequestProvider):
             },
             timeout=30.0,
         )
+
+    def _authenticated_user(self) -> dict:
+        if self._viewer_data is not None:
+            return self._viewer_data
+        response = self.client.get("/user")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not payload.get("login"):
+            raise ValueError("GitHub did not return the authenticated account.")
+        self._viewer_data = payload
+        return payload
+
+    def list_organizations(self) -> list[OrganizationSummary]:
+        """List the authenticated account and organizations visible to it."""
+        viewer = self._authenticated_user()
+        organizations = [
+            OrganizationSummary(
+                id=str(viewer.get("id", viewer["login"])),
+                name=viewer["login"],
+                display_name=viewer.get("name") or viewer["login"],
+                description=viewer.get("bio") or None,
+            )
+        ]
+        page = 1
+        while True:
+            response = self.client.get(
+                "/user/orgs",
+                params={"per_page": 100, "page": page},
+            )
+            response.raise_for_status()
+            batch = response.json()
+            if not isinstance(batch, list):
+                raise ValueError("GitHub organizations response was not a list.")
+            for item in batch:
+                if not isinstance(item, dict) or not item.get("login"):
+                    continue
+                organizations.append(
+                    OrganizationSummary(
+                        id=str(item.get("id", item["login"])),
+                        name=item["login"],
+                        display_name=item.get("name") or item["login"],
+                        description=item.get("description") or None,
+                    )
+                )
+            if len(batch) < 100:
+                break
+            page += 1
+
+        unique = {item.name.casefold(): item for item in organizations}
+        return sorted(unique.values(), key=lambda item: item.display_name.casefold())
+
+    def list_repositories(
+        self,
+        organization: str,
+        project: str | None = None,
+    ) -> list[RepositorySummary]:
+        """List repositories owned by the selected user or organization."""
+        del project
+        owner = organization.strip()
+        if not owner:
+            raise ValueError("GitHub owner or organization is required.")
+        viewer = self._authenticated_user()
+        is_viewer = owner.casefold() == str(viewer["login"]).casefold()
+        endpoint = "/user/repos" if is_viewer else f"/orgs/{owner}/repos"
+        repositories: list[RepositorySummary] = []
+        page = 1
+        while True:
+            params: dict[str, object] = {"per_page": 100, "page": page, "sort": "full_name"}
+            if is_viewer:
+                params.update({"affiliation": "owner", "visibility": "all"})
+            else:
+                params["type"] = "all"
+            response = self.client.get(endpoint, params=params)
+            response.raise_for_status()
+            batch = response.json()
+            if not isinstance(batch, list):
+                raise ValueError("GitHub repositories response was not a list.")
+            for item in batch:
+                if not isinstance(item, dict) or not item.get("name"):
+                    continue
+                visibility = item.get("visibility")
+                if not visibility:
+                    visibility = "private" if item.get("private") else "public"
+                repositories.append(
+                    RepositorySummary(
+                        id=str(item.get("id", item["name"])),
+                        name=item["name"],
+                        organization=owner,
+                        full_name=item.get("full_name") or f"{owner}/{item['name']}",
+                        description=item.get("description") or None,
+                        default_branch=item.get("default_branch") or None,
+                        visibility=str(visibility),
+                    )
+                )
+            if len(batch) < 100:
+                break
+            page += 1
+        return sorted(repositories, key=lambda item: item.name.casefold())
+
+    def validate_connection(self) -> None:
+        self._authenticated_user()
+
+    def get_changed_file_count(
+        self,
+        repository: str,
+        pull_number: int,
+    ) -> int | None:
+        response = self.client.get(f"/repos/{repository}/pulls/{pull_number}")
+        response.raise_for_status()
+        payload = response.json()
+        value = payload.get("changed_files") if isinstance(payload, dict) else None
+        return value if isinstance(value, int) and value >= 0 else None
 
     def get_pull_request(
         self,

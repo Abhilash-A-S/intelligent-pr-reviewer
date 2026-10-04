@@ -11,13 +11,17 @@ same `ReviewOrchestrator`; review logic is not duplicated in the UI.
 
 ## Included web experience
 
-- Provider and repository selection with an open-PR dashboard
+- Live, searchable provider discovery with an open-PR dashboard
+- GitHub account/organization → repository selection
+- Azure organization → project → repository selection
+- Manual entry fallback when a token cannot use discovery endpoints
 - Pull-request details, changed files, dry-run and publish actions
 - Explicit confirmation before any provider write
-- Live background-job progress and safe status polling
+- Live background-job progress, actual/planned LLM calls, batch/file activity,
+  filterable diagnostics, and safe status polling
 - Professional finding results, filtering, quality gate and JSON export
 - Current-session review history
-- GitHub, Azure DevOps and Ollama connection health
+- Validated GitHub, Azure DevOps and Ollama connection health
 - Light and dark themes, responsive navigation and Lucide icons
 - Server-only provider credentials; tokens never enter the browser bundle
 
@@ -61,10 +65,12 @@ uv run intelligent-pr-reviewer-api
 Open `http://127.0.0.1:8000`. FastAPI serves the Angular application and all
 `/api` routes from one process.
 
-On first launch, select GitHub or Azure DevOps, enter the repository details,
-and choose **Refresh**. Pull requests then come directly from the configured
-provider. Review progress, results, and history are populated only by reviews
-started through the current API process.
+On first launch, select GitHub or Azure DevOps and search the account,
+organization, project, and repository controls. The options come directly from
+the configured provider APIs. If discovery is restricted by token permissions,
+type the exact value and choose the manual-entry option. Select **Refresh** to
+load open pull requests. Review progress, results, and history are populated
+only by reviews started through the current API process.
 
 ## Frontend development with live reload
 
@@ -89,6 +95,8 @@ uv run pytest -q
 cd web
 npm run build
 npm run test:ci
+cd ..
+uv build --clear
 ```
 
 `npm run test:ci` requires Chrome or Chromium. The optimized initial bundle is

@@ -8,6 +8,7 @@ leaves the core review pipeline provider agnostic.
 """
 
 import base64
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import os
@@ -24,7 +25,12 @@ from pr_reviewer.providers.azure_diff import (
     normalize_change_types,
 )
 from pr_reviewer.providers.base import PullRequestProvider
-from pr_reviewer.providers.models import PullRequestSummary
+from pr_reviewer.providers.models import (
+    OrganizationSummary,
+    ProjectSummary,
+    PullRequestSummary,
+    RepositorySummary,
+)
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 
@@ -71,6 +77,7 @@ class AzureDevOpsProvider(PullRequestProvider):
     supports_batch_inline_comments = False
     supports_pull_request_listing = True
     supports_deferred_patch_hydration = True
+    supports_repository_discovery = True
     provider_name = "azure-devops"
     display_name = "Azure DevOps"
 
@@ -241,6 +248,167 @@ class AzureDevOpsProvider(PullRequestProvider):
         except ValueError:
             value = 8
         return max(1, min(value, 16))
+
+    @staticmethod
+    def _continuation_token(response: httpx.Response) -> str | None:
+        headers = getattr(response, "headers", None)
+        if not isinstance(headers, Mapping):
+            return None
+        value = headers.get("x-ms-continuationtoken")
+        return value if isinstance(value, str) and value else None
+
+    # ------------------------------------------------------------------
+    # Organization, project, and repository discovery
+    # ------------------------------------------------------------------
+
+    def list_organizations(self) -> list[OrganizationSummary]:
+        """List Azure DevOps organizations available to the PAT identity."""
+        profile_url = (
+            "https://app.vssps.visualstudio.com/"
+            "_apis/profile/profiles/me"
+        )
+        try:
+            profile_response = self.client.get(profile_url, params=self._qs())
+            self._raise_for_status(profile_response, "profile lookup")
+            profile = self._json_object(profile_response, "profile lookup")
+            member_id = profile.get("id")
+            if not member_id:
+                raise ValueError(
+                    "Azure DevOps did not return an identity for organization discovery."
+                )
+            accounts_response = self.client.get(
+                "https://app.vssps.visualstudio.com/_apis/accounts",
+                params=self._qs(memberId=member_id),
+            )
+            self._raise_for_status(accounts_response, "organization listing")
+            payload = self._json_object(accounts_response, "organization listing")
+            accounts = self._list_value(payload, "organization listing")
+        except (httpx.HTTPStatusError, ValueError):
+            if not self._org:
+                raise
+            accounts = [{"accountId": self._org, "accountName": self._org}]
+
+        organizations: list[OrganizationSummary] = []
+        for account in accounts:
+            if not isinstance(account, dict) or not account.get("accountName"):
+                continue
+            name = str(account["accountName"])
+            organizations.append(
+                OrganizationSummary(
+                    id=str(account.get("accountId", name)),
+                    name=name,
+                    display_name=name,
+                    description=None,
+                )
+            )
+        if self._org and all(
+            item.name.casefold() != self._org.casefold()
+            for item in organizations
+        ):
+            organizations.append(
+                OrganizationSummary(
+                    id=self._org,
+                    name=self._org,
+                    display_name=self._org,
+                )
+            )
+        unique = {item.name.casefold(): item for item in organizations}
+        return sorted(unique.values(), key=lambda item: item.display_name.casefold())
+
+    def validate_connection(self) -> None:
+        """Validate the PAT against a real Azure DevOps resource.
+
+        Profile discovery can be unavailable to otherwise valid, narrowly
+        scoped PATs. When an organization is configured, project discovery is
+        a more truthful access probe for this application's workflow.
+        """
+
+        if self._org:
+            self.list_projects(self._org)
+            return
+
+        profile_url = (
+            "https://app.vssps.visualstudio.com/"
+            "_apis/profile/profiles/me"
+        )
+        response = self.client.get(profile_url, params=self._qs())
+        self._raise_for_status(response, "connection validation")
+
+    def list_projects(self, organization: str) -> list[ProjectSummary]:
+        """List active projects in an Azure DevOps organization."""
+        org = organization.strip()
+        if not org:
+            raise ValueError("Azure DevOps organization is required.")
+        url = f"https://dev.azure.com/{quote(org, safe='')}/_apis/projects"
+        projects: list[ProjectSummary] = []
+        continuation: str | None = None
+        while True:
+            params = self._qs(stateFilter="wellFormed", **{"$top": 100})
+            if continuation:
+                params["continuationToken"] = continuation
+            response = self.client.get(url, params=params)
+            self._raise_for_status(response, "project listing")
+            payload = self._json_object(response, "project listing")
+            for item in self._list_value(payload, "project listing"):
+                if not isinstance(item, dict) or not item.get("name"):
+                    continue
+                projects.append(
+                    ProjectSummary(
+                        id=str(item.get("id", item["name"])),
+                        name=str(item["name"]),
+                        organization=org,
+                        description=item.get("description") or None,
+                    )
+                )
+            continuation = self._continuation_token(response)
+            if not continuation:
+                break
+        return sorted(projects, key=lambda item: item.name.casefold())
+
+    def list_repositories(
+        self,
+        organization: str,
+        project: str | None = None,
+    ) -> list[RepositorySummary]:
+        """List Git repositories in the selected Azure DevOps project."""
+        org = organization.strip()
+        project_name = (project or "").strip()
+        if not org or not project_name:
+            raise ValueError(
+                "Azure DevOps organization and project are required."
+            )
+        url = (
+            f"https://dev.azure.com/{quote(org, safe='')}/"
+            f"{quote(project_name, safe='')}/_apis/git/repositories"
+        )
+        response = self.client.get(url, params=self._qs())
+        self._raise_for_status(response, "repository listing")
+        payload = self._json_object(response, "repository listing")
+        repositories: list[RepositorySummary] = []
+        for item in self._list_value(payload, "repository listing"):
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            item_project = item.get("project")
+            resolved_project = (
+                item_project.get("name")
+                if isinstance(item_project, dict) and item_project.get("name")
+                else project_name
+            )
+            default_branch = str(item.get("defaultBranch") or "").removeprefix(
+                "refs/heads/"
+            )
+            repositories.append(
+                RepositorySummary(
+                    id=str(item.get("id", item["name"])),
+                    name=str(item["name"]),
+                    organization=org,
+                    project=str(resolved_project),
+                    full_name=f"{org}/{resolved_project}/{item['name']}",
+                    default_branch=default_branch or None,
+                    visibility=None,
+                )
+            )
+        return sorted(repositories, key=lambda item: item.name.casefold())
 
     # ------------------------------------------------------------------
     # Pull-request discovery and metadata
@@ -646,6 +814,17 @@ class AzureDevOpsProvider(PullRequestProvider):
             ChangedFile(file_path=change.file_path, status=change.status)
             for change in changes
         ]
+
+    def get_changed_file_count(
+        self,
+        repository: str,
+        pull_number: int,
+    ) -> int | None:
+        iteration = self._get_iteration_context(repository, pull_number)
+        entries = self._get_all_change_entries(
+            repository, pull_number, iteration.iteration_id
+        )
+        return sum(self._map_change(entry) is not None for entry in entries)
 
     def hydrate_changed_files(
         self,

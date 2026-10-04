@@ -1,5 +1,6 @@
 from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from pr_reviewer.providers.azure_devops import AzureDevOpsProvider
@@ -10,7 +11,68 @@ def response_with(payload):
     response = Mock()
     response.json.return_value = payload
     response.status_code = 200
+    response.headers = {}
     return response
+
+
+def test_azure_repository_discovery_lists_organizations_projects_and_repositories():
+    client = Mock()
+    client.get.side_effect = [
+        response_with({"id": "member-1"}),
+        response_with(
+            {"value": [{"accountId": "org-1", "accountName": "acme"}]}
+        ),
+        response_with(
+            {
+                "value": [
+                    {
+                        "id": "project-1",
+                        "name": "Platform",
+                        "description": "Core services",
+                    }
+                ]
+            }
+        ),
+        response_with(
+            {
+                "value": [
+                    {
+                        "id": "repo-1",
+                        "name": "reviewer",
+                        "defaultBranch": "refs/heads/main",
+                        "project": {"name": "Platform"},
+                    }
+                ]
+            }
+        ),
+    ]
+    provider = AzureDevOpsProvider(client=client)
+
+    organizations = provider.list_organizations()
+    projects = provider.list_projects("acme")
+    repositories = provider.list_repositories("acme", "Platform")
+
+    assert organizations[0].name == "acme"
+    assert projects[0].description == "Core services"
+    assert repositories[0].full_name == "acme/Platform/reviewer"
+    assert repositories[0].default_branch == "main"
+
+
+def test_azure_organization_discovery_falls_back_to_configured_org():
+    failed = response_with({"message": "profile unavailable"})
+    failed.status_code = 403
+    failed.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "forbidden",
+        request=Mock(),
+        response=failed,
+    )
+    client = Mock()
+    client.get.return_value = failed
+    provider = AzureDevOpsProvider(organization="configured-org", client=client)
+
+    organizations = provider.list_organizations()
+
+    assert [item.name for item in organizations] == ["configured-org"]
 
 
 def test_list_pull_requests_returns_provider_neutral_models():

@@ -6,6 +6,7 @@ import { ReviewerApi } from '../../core/api.service';
 import { ReviewJob } from '../../core/models';
 import { Icon } from '../../shared/icon';
 import { ProviderMark } from '../../shared/provider-mark';
+import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 
 interface HistoryRow {
   id: string;
@@ -24,7 +25,7 @@ interface HistoryRow {
 
 @Component({
   selector: 'app-history-page',
-  imports: [FormsModule, RouterLink, Icon, ProviderMark],
+  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect],
   templateUrl: './history.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -36,6 +37,19 @@ export class HistoryPage {
   readonly search = signal('');
   readonly provider = signal<'all' | 'github' | 'azure-devops'>('all');
   readonly decision = signal<'all' | HistoryRow['decision']>('all');
+  readonly providerOptions: SmartSelectOption[] = [
+    { value: 'all', label: 'All providers' },
+    { value: 'github', label: 'GitHub' },
+    { value: 'azure-devops', label: 'Azure DevOps' },
+  ];
+  readonly decisionOptions: SmartSelectOption[] = [
+    { value: 'all', label: 'All decisions' },
+    { value: 'blocked', label: 'Block merge' },
+    { value: 'changes', label: 'Request changes' },
+    { value: 'passed', label: 'Passed' },
+    { value: 'running', label: 'Running' },
+    { value: 'failed', label: 'Failed' },
+  ];
 
   readonly metrics = computed(() => {
     const rows = this.rows();
@@ -59,7 +73,8 @@ export class HistoryPage {
     return this.rows().filter((row) => {
       const providerMatch = this.provider() === 'all' || row.provider === this.provider();
       const decisionMatch = this.decision() === 'all' || row.decision === this.decision();
-      const searchable = `${row.title} ${row.repository} ${row.author} ${row.pullNumber}`.toLowerCase();
+      const searchable =
+        `${row.title} ${row.repository} ${row.author} ${row.pullNumber}`.toLowerCase();
       return providerMatch && decisionMatch && (!search || searchable.includes(search));
     });
   });
@@ -74,7 +89,8 @@ export class HistoryPage {
       return {
         date,
         passed: matching.filter((row) => row.decision === 'passed').length,
-        blocked: matching.filter((row) => ['blocked', 'changes', 'failed'].includes(row.decision)).length,
+        blocked: matching.filter((row) => ['blocked', 'changes', 'failed'].includes(row.decision))
+          .length,
       };
     });
     const maximum = Math.max(1, ...days.flatMap((day) => [day.passed, day.blocked]));
@@ -88,7 +104,11 @@ export class HistoryPage {
   readonly historyRangeLabel = computed(() => {
     const trend = this.trend();
     if (!trend.length) return '—';
-    const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const format = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
     return `${format.format(trend[0].date)} – ${format.format(trend.at(-1)!.date)}`;
   });
 
@@ -116,6 +136,18 @@ export class HistoryPage {
         this.error.set(error?.error?.detail ?? 'Review history could not be loaded.');
       },
     });
+  }
+
+  setProviderFilter(value: string): void {
+    if (['all', 'github', 'azure-devops'].includes(value)) {
+      this.provider.set(value as 'all' | 'github' | 'azure-devops');
+    }
+  }
+
+  setDecisionFilter(value: string): void {
+    if (['all', 'blocked', 'changes', 'passed', 'running', 'failed'].includes(value)) {
+      this.decision.set(value as 'all' | HistoryRow['decision']);
+    }
   }
 
   decisionLabel(decision: HistoryRow['decision']): string {
@@ -156,7 +188,11 @@ export class HistoryPage {
     const quality = job.result?.quality_gate;
     const summary = job.result_summary;
     const total = quality
-      ? quality.critical_count + quality.high_count + quality.medium_count + quality.low_count + quality.suggestion_count
+      ? quality.critical_count +
+        quality.high_count +
+        quality.medium_count +
+        quality.low_count +
+        quality.suggestion_count
       : (summary?.findings ?? 0);
     const qualityDecision = String(quality?.decision ?? summary?.decision ?? '').toLowerCase();
     const decision: HistoryRow['decision'] =
@@ -176,7 +212,10 @@ export class HistoryPage {
       provider: job.command.provider,
       repository: job.command.repository.split('/').at(-1) ?? job.command.repository,
       pullNumber: job.command.pull_number,
-      title: job.result?.pull_request.title ?? summary?.title ?? `Pull request #${job.command.pull_number}`,
+      title:
+        job.result?.pull_request.title ??
+        summary?.title ??
+        `Pull request #${job.command.pull_number}`,
       author: job.result?.pull_request.author ?? summary?.author ?? 'Unavailable',
       decision,
       findings: total,
@@ -184,7 +223,12 @@ export class HistoryPage {
       duration: typeof duration === 'number' ? `${duration.toFixed(1)}s` : '—',
       created: Number.isNaN(createdAt.getTime())
         ? '—'
-        : createdAt.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        : createdAt.toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
       createdAt,
     };
   }

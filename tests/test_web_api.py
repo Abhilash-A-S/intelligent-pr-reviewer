@@ -1,8 +1,15 @@
 from unittest.mock import Mock
 
+import httpx
+
 from fastapi.testclient import TestClient
 
-from pr_reviewer.providers.models import PullRequestSummary
+from pr_reviewer.providers.models import (
+    OrganizationSummary,
+    ProjectSummary,
+    PullRequestSummary,
+    RepositorySummary,
+)
 from pr_reviewer.review.models import ChangedFile, ChangedLine, PullRequest
 from pr_reviewer.web import api as web_api
 
@@ -63,6 +70,7 @@ def test_health_reports_runtime_configuration_without_exposing_credentials(monke
 
 def test_pull_request_listing_uses_provider_neutral_summary(monkeypatch):
     provider = Mock()
+    provider.get_changed_file_count.return_value = 6
     provider.list_pull_requests.return_value = [
         PullRequestSummary(
             number=14,
@@ -85,7 +93,86 @@ def test_pull_request_listing_uses_provider_neutral_summary(monkeypatch):
     payload = response.json()
     assert payload["total"] == 1
     assert payload["items"][0]["number"] == 14
+    assert payload["items"][0]["changed_files"] == 6
     provider.list_pull_requests.assert_called_once_with("acme/store", state="open")
+    provider.get_changed_file_count.assert_called_once_with("acme/store", 14)
+
+
+def test_health_provider_probe_reports_authentication_failure(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "configured-but-invalid")
+    monkeypatch.delenv("AZURE_DEVOPS_PAT", raising=False)
+    provider = Mock()
+    request = httpx.Request("GET", "https://api.github.com/user")
+    response = httpx.Response(401, request=request)
+    provider.validate_connection.side_effect = httpx.HTTPStatusError(
+        "unauthorized",
+        request=request,
+        response=response,
+    )
+    monkeypatch.setattr(web_api, "create_pull_request_provider", lambda _name: provider)
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+
+    payload = client.get("/api/health", params={"probe_providers": True}).json()
+
+    github = next(item for item in payload["providers"] if item["id"] == "github")
+    assert github["configured"] is True
+    assert github["connected"] is False
+    assert github["state"] == "authentication-failed"
+    assert "configured-but-invalid" not in str(payload)
+
+
+def test_repository_discovery_endpoints_return_filtered_provider_data(monkeypatch):
+    provider = Mock()
+    provider.list_organizations.return_value = [
+        OrganizationSummary(id="1", name="acme", display_name="Acme"),
+        OrganizationSummary(id="2", name="other", display_name="Other"),
+    ]
+    provider.list_projects.return_value = [
+        ProjectSummary(id="p1", name="Platform", organization="acme")
+    ]
+    provider.list_repositories.return_value = [
+        RepositorySummary(
+            id="r1",
+            name="reviewer",
+            organization="acme",
+            project="Platform",
+            full_name="acme/Platform/reviewer",
+            default_branch="main",
+        )
+    ]
+    monkeypatch.setattr(web_api, "create_pull_request_provider", lambda _name: provider)
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+
+    organizations = client.get(
+        "/api/repository-discovery/organizations",
+        params={"provider": "github", "query": "acme"},
+    )
+    projects = client.get(
+        "/api/repository-discovery/projects",
+        params={"provider": "azure-devops", "organization": "acme"},
+    )
+    repositories = client.get(
+        "/api/repository-discovery/repositories",
+        params={
+            "provider": "azure-devops",
+            "organization": "acme",
+            "project": "Platform",
+        },
+    )
+
+    assert organizations.status_code == 200
+    assert organizations.json()["items"] == [
+        {
+            "id": "1",
+            "name": "acme",
+            "display_name": "Acme",
+            "description": None,
+        }
+    ]
+    assert projects.json()["items"][0]["name"] == "Platform"
+    assert repositories.json()["items"][0]["full_name"] == "acme/Platform/reviewer"
+    provider.list_projects.assert_called_once_with("acme")
+    provider.list_repositories.assert_called_once_with("acme", "Platform")
 
 
 def test_pull_request_detail_returns_live_provider_metadata(monkeypatch):

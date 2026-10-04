@@ -1,6 +1,9 @@
 <section class="page dashboard-page">
   <header class="page-heading heading-with-action">
-    <div><h1>Pull Requests</h1><p>Select a pull request to review</p></div>
+    <div>
+      <h1>Pull Requests</h1>
+      <p>Select a pull request to review</p>
+    </div>
   </header>
 
   <section class="card repository-filter" aria-labelledby="repository-filter-title">
@@ -25,46 +28,76 @@
     </div>
 
     <div class="filter-grid" [class.github-grid]="workspace.provider() === 'github'">
-      <label class="field">
-        <span>{{ workspace.provider() === 'github' ? 'Owner' : 'Organization' }}</span>
-        <div class="input-shell">
-          <app-icon name="building-2" />
-          <input
-            type="text"
-            [ngModel]="workspace.organization()"
-            (ngModelChange)="workspace.organization.set($event)"
-            autocomplete="off"
-          />
-        </div>
-      </label>
+      <div class="field">
+        <span>{{
+          workspace.provider() === 'github' ? 'Owner / organization' : 'Organization'
+        }}</span>
+        <app-smart-select
+          icon="building-2"
+          [options]="organizationOptions()"
+          [value]="workspace.organization()"
+          [placeholder]="
+            workspace.provider() === 'github'
+              ? 'Select a GitHub account'
+              : 'Select an Azure organization'
+          "
+          [ariaLabel]="
+            workspace.provider() === 'github'
+              ? 'GitHub owner or organization'
+              : 'Azure DevOps organization'
+          "
+          searchPlaceholder="Search organizations…"
+          [searchable]="true"
+          [allowCustomValue]="true"
+          [loading]="workspace.organizationLoading()"
+          [error]="workspace.organizationError()"
+          emptyLabel="No organizations found"
+          (valueChange)="workspace.selectOrganization($event)"
+        />
+      </div>
 
       @if (workspace.provider() === 'azure-devops') {
-        <label class="field">
+        <div class="field">
           <span>Project</span>
-          <div class="input-shell">
-            <app-icon name="braces" />
-            <input
-              type="text"
-              [ngModel]="workspace.project()"
-              (ngModelChange)="workspace.project.set($event)"
-              autocomplete="off"
-            />
-          </div>
-        </label>
-      }
-
-      <label class="field">
-        <span>Repository</span>
-        <div class="input-shell">
-          <app-icon name="database" />
-          <input
-            type="text"
-            [ngModel]="workspace.repositoryName()"
-            (ngModelChange)="workspace.repositoryName.set($event)"
-            autocomplete="off"
+          <app-smart-select
+            icon="braces"
+            [options]="projectOptions()"
+            [value]="workspace.project()"
+            placeholder="Select an Azure project"
+            ariaLabel="Azure DevOps project"
+            searchPlaceholder="Search projects…"
+            [searchable]="true"
+            [allowCustomValue]="true"
+            [loading]="workspace.projectLoading()"
+            [error]="workspace.projectError()"
+            [disabled]="!workspace.organization()"
+            emptyLabel="No projects found"
+            (valueChange)="workspace.selectProject($event)"
           />
         </div>
-      </label>
+      }
+
+      <div class="field">
+        <span>Repository</span>
+        <app-smart-select
+          icon="database"
+          [options]="repositoryOptions()"
+          [value]="workspace.repositoryName()"
+          placeholder="Select a repository"
+          ariaLabel="Repository"
+          searchPlaceholder="Search repositories…"
+          [searchable]="true"
+          [allowCustomValue]="true"
+          [loading]="workspace.repositoryLoading()"
+          [error]="workspace.repositoryError()"
+          [disabled]="
+            !workspace.organization() ||
+            (workspace.provider() === 'azure-devops' && !workspace.project())
+          "
+          emptyLabel="No repositories found"
+          (valueChange)="workspace.selectRepository($event)"
+        />
+      </div>
 
       <button
         class="button primary refresh-button"
@@ -77,6 +110,19 @@
       </button>
     </div>
 
+    @if (workspace.discoveryError()) {
+      <div class="inline-alert warning-alert discovery-alert" role="status">
+        <app-icon name="circle-alert" />
+        <span
+          ><strong>Automatic discovery is unavailable.</strong>
+          {{ workspace.discoveryError() }}</span
+        >
+        <button class="button subtle" type="button" (click)="workspace.loadOrganizations()">
+          Retry
+        </button>
+      </div>
+    }
+
     @if (workspace.error()) {
       <div class="inline-alert error-alert" role="alert">
         <app-icon name="circle-alert" />
@@ -86,25 +132,29 @@
   </section>
 
   <div class="metric-grid dashboard-metrics">
-    <article class="metric-card neutral">
+    <article class="metric-card neutral" [class.is-zero]="metrics().open === 0">
       <span class="metric-icon"><app-icon name="git-pull-request" /></span>
-      <span><small>Open PRs</small><strong>{{ metrics().open }}</strong></span>
-      <em>Across this repository</em>
+      <span class="metric-copy"
+        ><small>Open PRs</small><strong>{{ metrics().open }}</strong></span
+      >
     </article>
-    <article class="metric-card warning">
+    <article class="metric-card warning" [class.is-zero]="metrics().awaiting === 0">
       <span class="metric-icon"><app-icon name="clock-3" /></span>
-      <span><small>Awaiting review</small><strong>{{ metrics().awaiting }}</strong></span>
-      <em>Ready to analyse</em>
+      <span class="metric-copy"
+        ><small>Awaiting review</small><strong>{{ metrics().awaiting }}</strong></span
+      >
     </article>
-    <article class="metric-card danger">
+    <article class="metric-card danger" [class.is-zero]="metrics().blocked === 0">
       <span class="metric-icon"><app-icon name="octagon-alert" /></span>
-      <span><small>Blocked</small><strong>{{ metrics().blocked }}</strong></span>
-      <em>Critical issues found</em>
+      <span class="metric-copy"
+        ><small>Blocked</small><strong>{{ metrics().blocked }}</strong></span
+      >
     </article>
-    <article class="metric-card success">
+    <article class="metric-card success" [class.is-zero]="metrics().passed === 0">
       <span class="metric-icon"><app-icon name="shield-check" /></span>
-      <span><small>Passed</small><strong>{{ metrics().passed }}</strong></span>
-      <em>Quality gate passed</em>
+      <span class="metric-copy"
+        ><small>Passed</small><strong>{{ metrics().passed }}</strong></span
+      >
     </article>
   </div>
 
@@ -120,16 +170,14 @@
             (ngModelChange)="search.set($event)"
           />
         </label>
-        <label class="select-shell">
-          <app-icon name="list-filter" />
-          <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
-            <option value="all">All statuses</option>
-            <option value="awaiting">Awaiting review</option>
-            <option value="blocked">Blocked</option>
-            <option value="passed">Passed</option>
-          </select>
-          <app-icon name="chevron-down" />
-        </label>
+        <app-smart-select
+          class="toolbar-select"
+          icon="list-filter"
+          [options]="statusOptions"
+          [value]="statusFilter()"
+          ariaLabel="Filter by review status"
+          (valueChange)="setStatusFilter($event)"
+        />
       </div>
     </div>
 
@@ -150,7 +198,17 @@
         <tbody>
           @for (pullRequest of filteredPullRequests(); track pullRequest.number) {
             <tr>
-              <td><a class="pr-number" [routerLink]="['/pull-requests', pullRequest.number]" [queryParams]="{ provider: workspace.provider(), repository: workspace.repository() }">#{{ pullRequest.number }}</a></td>
+              <td>
+                <a
+                  class="pr-number"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                  >#{{ pullRequest.number }}</a
+                >
+              </td>
               <td>
                 <a
                   class="pr-title"
@@ -163,12 +221,36 @@
                   {{ pullRequest.title }}
                 </a>
               </td>
-              <td><span class="author"><span class="mini-avatar">{{ initials(pullRequest.author) }}</span>{{ pullRequest.author }}</span></td>
-              <td><span class="branch"><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span></td>
-              <td>{{ pullRequest.changed_files ?? '—' }}</td>
+              <td>
+                <span class="author"
+                  ><span class="mini-avatar">{{ initials(pullRequest.author) }}</span
+                  >{{ pullRequest.author }}</span
+                >
+              </td>
+              <td>
+                <span class="branch"
+                  ><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span
+                >
+              </td>
+              <td>
+                @if (
+                  pullRequest.changed_files !== null && pullRequest.changed_files !== undefined
+                ) {
+                  <span class="file-count-badge">{{ pullRequest.changed_files }}</span>
+                } @else {
+                  <span
+                    class="file-count-unavailable"
+                    title="The provider did not expose a lightweight file count"
+                    >N/A</span
+                  >
+                }
+              </td>
               <td>{{ relativeTime(pullRequest.updated_at) }}</td>
               <td>
-                <span class="status-pill" [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')">
+                <span
+                  class="status-pill"
+                  [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')"
+                >
                   <span></span>{{ statusLabel(pullRequest) }}
                 </span>
               </td>
@@ -181,7 +263,8 @@
                     repository: workspace.repository(),
                   }"
                   aria-label="Review pull request"
-                >Review</a>
+                  >Review</a
+                >
               </td>
             </tr>
           } @empty {
@@ -190,15 +273,27 @@
                 <div class="empty-state">
                   <app-icon name="git-pull-request" />
                   @if (workspace.loading()) {
-                    <strong>Loading pull requests…</strong><span>Contacting the selected provider.</span>
+                    <strong>Loading pull requests…</strong
+                    ><span>Contacting the selected provider.</span>
                   } @else if (!workspace.hasRepositorySelection()) {
-                    <strong>Select a repository</strong><span>Enter the provider repository details above, then refresh.</span>
+                    <strong>Select a repository</strong
+                    ><span>Enter the provider repository details above, then refresh.</span>
                   } @else if (!workspace.loaded()) {
-                    <strong>Repository ready</strong><span>Refresh to load its open pull requests.</span>
+                    <strong>Repository ready</strong
+                    ><span>Refresh to load its open pull requests.</span>
                   } @else if (search() || statusFilter() !== 'all') {
-                    <strong>No matching pull requests</strong><span>Adjust the search or status filter.</span>
+                    <strong>No matching pull requests</strong
+                    ><span>Adjust the search or status filter.</span>
+                    <button
+                      class="button secondary empty-state-action"
+                      type="button"
+                      (click)="clearFilters()"
+                    >
+                      Clear filters
+                    </button>
                   } @else {
-                    <strong>No open pull requests</strong><span>The selected provider returned an empty list.</span>
+                    <strong>No open pull requests</strong
+                    ><span>The selected provider returned an empty list.</span>
                   }
                 </div>
               </td>
@@ -209,8 +304,13 @@
     </div>
 
     <footer class="table-footer">
-      <span>Showing {{ filteredPullRequests().length }} of {{ workspace.pullRequests().length }} pull requests</span>
-      @if (workspace.pullRequests().length) { <span class="live-data-label">Live provider data</span> }
+      <span
+        >Showing {{ filteredPullRequests().length }} of {{ workspace.pullRequests().length }} pull
+        requests</span
+      >
+      @if (workspace.pullRequests().length) {
+        <span class="live-data-label">Live provider data</span>
+      }
     </footer>
   </section>
 </section>

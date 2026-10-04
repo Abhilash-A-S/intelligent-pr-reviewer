@@ -1,6 +1,11 @@
 from abc import ABC, abstractmethod
 
-from pr_reviewer.providers.models import PullRequestSummary
+from pr_reviewer.providers.models import (
+    OrganizationSummary,
+    ProjectSummary,
+    PullRequestSummary,
+    RepositorySummary,
+)
 from pr_reviewer.review.models import ChangedFile, PullRequest
 
 
@@ -17,6 +22,7 @@ class PullRequestProvider(ABC):
 
     supports_batch_inline_comments = False
     supports_pull_request_listing = False
+    supports_repository_discovery = False
     supports_deferred_patch_hydration = False
     provider_name = "unknown"
     display_name = "Pull Request provider"
@@ -32,6 +38,46 @@ class PullRequestProvider(ABC):
         ``supports_pull_request_listing = True``.
         """
         return []
+
+    def list_organizations(self) -> list[OrganizationSummary]:
+        """Return organizations or owners visible to the provider token."""
+        return []
+
+    def list_projects(self, organization: str) -> list[ProjectSummary]:
+        """Return projects for providers that group repositories by project."""
+        return []
+
+    def list_repositories(
+        self,
+        organization: str,
+        project: str | None = None,
+    ) -> list[RepositorySummary]:
+        """Return repositories under the selected provider context."""
+        return []
+
+    def validate_connection(self) -> None:
+        """Raise when the configured credential cannot access its provider.
+
+        Adapters can override this with a cheaper provider-native identity or
+        organization probe. The default keeps third-party adapters compatible
+        while still validating credentials when discovery is implemented.
+        """
+
+        self.list_organizations()
+
+    def get_changed_file_count(
+        self,
+        repository: str,
+        pull_number: int,
+    ) -> int | None:
+        """Return a lightweight changed-file count when the provider supports it.
+
+        Returning ``None`` is intentionally different from returning zero: it
+        tells selection UIs that the count is unavailable without forcing the
+        provider to download or reconstruct every patch.
+        """
+
+        return None
 
     def publish_inline_comments_batch(
         self,

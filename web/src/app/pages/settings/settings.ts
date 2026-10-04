@@ -53,6 +53,18 @@ export class SettingsPage {
     return this.health()?.providers.find((item) => item.id === provider)?.connected ?? false;
   }
 
+  providerStatusLabel(provider: 'github' | 'azure-devops'): string {
+    const status = this.health()?.providers.find((item) => item.id === provider);
+    if (!status) return this.checking() ? 'Checking' : 'Unavailable';
+    return {
+      connected: 'Connected',
+      configured: 'Configured',
+      'not-configured': 'Not configured',
+      'authentication-failed': 'Authentication failed',
+      unavailable: 'Unavailable',
+    }[status.state];
+  }
+
   save(): void {
     this.preferences.save();
     this.saved.set(true);

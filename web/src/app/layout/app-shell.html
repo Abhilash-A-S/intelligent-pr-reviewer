@@ -2,6 +2,7 @@
   class="app-frame"
   [class.sidebar-collapsed]="sidebarCollapsed()"
   [class.mobile-nav-open]="mobileNavigationOpen()"
+  [class.page-scrolled]="pageScrolled()"
 >
   <header class="topbar">
     <a class="brand" routerLink="/" aria-label="Intelligent PR Reviewer dashboard">
@@ -12,34 +13,66 @@
       </span>
     </a>
 
-    <div class="topbar-health" aria-label="Integration health">
-      <span class="health-chip" [class.is-offline]="providerConnected('github') === false">
-        <app-provider-mark provider="github" />
-        <span class="status-dot"></span>
-        GitHub
-        <span class="health-state">
-          {{ providerConnected('github') === null ? 'Checking' : providerConnected('github') ? 'Connected' : 'Not configured' }}
-        </span>
-      </span>
-      <span class="health-chip" [class.is-offline]="providerConnected('azure-devops') === false">
-        <app-provider-mark provider="azure-devops" />
-        <span class="status-dot"></span>
-        Azure
-        <span class="health-state">
-          {{ providerConnected('azure-devops') === null ? 'Checking' : providerConnected('azure-devops') ? 'Connected' : 'Not configured' }}
-        </span>
-      </span>
-      <span class="health-chip" [class.is-offline]="health()?.ollama?.ready === false">
-        <app-icon name="bot" />
-        <span class="status-dot"></span>
-        Ollama
-        <span class="health-state">
-          {{ health()?.ollama?.ready === null || !health() ? 'Checking' : health()?.ollama?.ready ? 'Ready' : 'Offline' }}
-        </span>
-      </span>
-    </div>
-
     <div class="topbar-actions">
+      <div class="topbar-health" aria-label="Integration health">
+        <span
+          class="health-chip"
+          [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
+          [class.is-muted]="providerState('github') === 'not-configured'"
+          [class.is-warning]="providerState('github') === 'configured'"
+          [attr.title]="providerDetail('github')"
+        >
+          <app-provider-mark provider="github" /><span class="status-dot"></span>GitHub
+          <span class="health-state">{{ healthState('github') }}</span>
+        </span>
+        <span
+          class="health-chip"
+          [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
+          [class.is-muted]="providerState('azure-devops') === 'not-configured'"
+          [class.is-warning]="providerState('azure-devops') === 'configured'"
+          [attr.title]="providerDetail('azure-devops')"
+        >
+          <app-provider-mark provider="azure-devops" /><span class="status-dot"></span>Azure
+          <span class="health-state">{{ healthState('azure-devops') }}</span>
+        </span>
+        <span class="health-chip" [class.is-offline]="health()?.ollama?.ready === false">
+          <app-icon name="bot" /><span class="status-dot"></span>Ollama
+          <span class="health-state">{{ healthState('ollama') }}</span>
+        </span>
+      </div>
+
+      <div class="mobile-health-wrapper">
+        <button
+          class="icon-button mobile-health-button"
+          type="button"
+          aria-label="Show integration health"
+          [attr.aria-expanded]="mobileHealthOpen()"
+          [class.has-issue]="healthHasIssue()"
+          (click)="toggleMobileHealth()"
+        >
+          <app-icon name="activity" /><span class="status-dot"></span>
+        </button>
+        @if (mobileHealthOpen()) {
+          <div class="mobile-health-popover" aria-label="Integration health details">
+            <strong>Integration health</strong>
+            <span
+              [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
+              [attr.title]="providerDetail('github')"
+              ><app-provider-mark provider="github" />GitHub
+              <em>{{ healthState('github') }}</em></span
+            >
+            <span
+              [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
+              [attr.title]="providerDetail('azure-devops')"
+              ><app-provider-mark provider="azure-devops" />Azure DevOps
+              <em>{{ healthState('azure-devops') }}</em></span
+            >
+            <span [class.is-offline]="health()?.ollama?.ready === false"
+              ><app-icon name="bot" />Ollama <em>{{ healthState('ollama') }}</em></span
+            >
+          </div>
+        }
+      </div>
       <button
         class="icon-button theme-toggle"
         type="button"
@@ -50,7 +83,10 @@
       </button>
       <button class="profile-button" type="button" aria-label="Open user menu">
         <span class="avatar">IR</span>
-        <span class="profile-copy"><strong>Review engine</strong><small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small></span>
+        <span class="profile-copy"
+          ><strong>Review engine</strong
+          ><small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small></span
+        >
         <app-icon name="chevron-down" />
       </button>
       <button
@@ -70,8 +106,8 @@
         <a
           class="nav-item"
           [routerLink]="item.route"
-          routerLinkActive="active"
-          [routerLinkActiveOptions]="{ exact: item.exact }"
+          [class.active]="isNavigationActive(item.section)"
+          [attr.aria-current]="isNavigationActive(item.section) ? 'page' : null"
           (click)="closeMobileNavigation()"
           [attr.title]="sidebarCollapsed() ? item.label : null"
         >
@@ -80,7 +116,6 @@
         </a>
       }
     </nav>
-
   </aside>
 
   <button
