@@ -1,0 +1,158 @@
+<section class="page pr-details-page">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span>#{{ pullRequest().number }}</span>
+  </nav>
+
+  <header class="page-heading pr-heading">
+    <div class="pr-heading-main">
+      <div class="title-line">
+        <h1>{{ pullRequest().title }}</h1>
+        <span class="state-pill"><span></span>{{ pullRequest().state || 'Active' }}</span>
+      </div>
+      <div class="pr-meta-line">
+        <span class="author"><span class="mini-avatar">{{ authorInitials() }}</span>{{ pullRequest().author }}</span>
+        <span><app-provider-mark [provider]="provider()" />{{ repository() }}</span>
+        <span><app-icon name="git-branch" />{{ pullRequest().head_branch }} → {{ pullRequest().base_branch }}</span>
+        <span title="Head commit"><app-icon name="code-2" />{{ pullRequest().head_commit.slice(0, 9) }}</span>
+      </div>
+    </div>
+    <div class="pr-heading-side">
+      @if (previewData()) { <span class="preview-badge"><app-icon name="sparkles" />Preview data</span> }
+      <span class="file-count"><strong>{{ pullRequest().changed_files ?? files().length }}</strong><small>changed files</small></span>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="inline-alert warning-alert" role="status">
+      <app-icon name="triangle-alert" /><span>{{ error() }}</span>
+    </div>
+  }
+
+  <div class="details-layout">
+    <div class="details-main">
+      <div class="tab-list" role="tablist">
+        <button type="button" [class.active]="activeTab() === 'overview'" (click)="activeTab.set('overview')">Overview</button>
+        <button type="button" [class.active]="activeTab() === 'files'" (click)="activeTab.set('files')">Changed files <span>{{ files().length }}</span></button>
+        <button type="button" [class.active]="activeTab() === 'commits'" (click)="activeTab.set('commits')">Commits @if (previewData()) { <span>3</span> }</button>
+      </div>
+
+      @if (activeTab() === 'overview') {
+        <section class="card overview-card">
+          <div class="card-heading">
+            <div><h2>Pull request overview</h2><p>Change intent and scope supplied by the author.</p></div>
+            <button class="icon-button" type="button" aria-label="More pull request actions"><app-icon name="more-horizontal" /></button>
+          </div>
+          <p class="description">{{ pullRequest().description ?? 'No pull request description was provided.' }}</p>
+          <div class="change-summary">
+            <div><span class="change-icon files"><app-icon name="file-diff" /></span><span><strong>{{ pullRequest().changed_files ?? files().length }}</strong><small>Files changed</small></span></div>
+            <div><span class="change-icon additions">+</span><span><strong>{{ additions() ?? '—' }}</strong><small>Additions</small></span></div>
+            <div><span class="change-icon deletions">−</span><span><strong>{{ deletions() ?? '—' }}</strong><small>Deletions</small></span></div>
+            <div><span class="change-icon commits"><app-icon name="git-branch" /></span><span><strong>{{ previewData() ? 3 : '—' }}</strong><small>Commits</small></span></div>
+          </div>
+        </section>
+
+        <section class="card data-card changed-files-card">
+          <div class="table-toolbar">
+            <div><h2>Changed files</h2><p>Application files eligible for review and context.</p></div>
+            <button class="button subtle" type="button" (click)="activeTab.set('files')">View all files <app-icon name="arrow-right" /></button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table files-table">
+              <thead><tr><th>File</th><th>Status</th><th>Language</th><th>Changed lines</th><th>Diff</th></tr></thead>
+              <tbody>
+                @for (file of files().slice(0, 5); track file.file_path) {
+                  <tr>
+                    <td><span class="file-name"><span class="file-icon"><app-icon name="file-code-2" /></span>{{ file.file_path }}</span></td>
+                    <td><span [class]="statusClass(file.status)">{{ file.status }}</span></td>
+                    <td>{{ file.language ?? 'Unknown' }}</td>
+                    <td>{{ file.changed_line_count }}</td>
+                    <td><span class="diff-stat"><b>+{{ file.additions ?? '—' }}</b><em>−{{ file.deletions ?? '—' }}</em></span></td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+      } @else if (activeTab() === 'files') {
+        <section class="card data-card changed-files-card">
+          <div class="table-toolbar"><div><h2>All changed files</h2><p>{{ files().length }} files from the pull request head.</p></div></div>
+          <div class="file-list">
+            @for (file of files(); track file.file_path) {
+              <div class="file-list-row"><span class="file-icon"><app-icon name="file-code-2" /></span><span><strong>{{ file.file_path }}</strong><small>{{ file.language ?? 'Unknown' }} · {{ file.changed_line_count }} changed lines</small></span><span [class]="statusClass(file.status)">{{ file.status }}</span></div>
+            }
+          </div>
+        </section>
+      } @else {
+        <section class="card placeholder-card"><span class="empty-illustration"><app-icon name="git-branch" /></span><h2>{{ previewData() ? '3 preview commits' : 'Commit details are not loaded' }}</h2><p>Commit metadata remains provider-owned and is intentionally outside the first UI API contract.</p></section>
+      }
+    </div>
+
+    <aside class="details-sidebar">
+      <section class="card start-review-card">
+        <div class="card-heading"><div><h2>Start review</h2><p>Configure the depth and output.</p></div><span class="ai-mark"><app-icon name="bot" /></span></div>
+
+        <fieldset class="depth-options">
+          <legend>Review depth</legend>
+          <label [class.selected]="depth() === 'fast'">
+            <input type="radio" name="depth" value="fast" [checked]="depth() === 'fast'" (change)="setDepth('fast')" />
+            <span class="radio-dot"></span>
+            <span><strong>Fast</strong><small>Deterministic first, minimum LLM calls</small></span>
+          </label>
+          <label [class.selected]="depth() === 'standard'">
+            <input type="radio" name="depth" value="standard" [checked]="depth() === 'standard'" (change)="setDepth('standard')" />
+            <span class="radio-dot"></span>
+            <span><strong>Standard</strong><small>Balanced coverage and performance</small></span>
+            <em>Recommended</em>
+          </label>
+          <label [class.selected]="depth() === 'deep'">
+            <input type="radio" name="depth" value="deep" [checked]="depth() === 'deep'" (change)="setDepth('deep')" />
+            <span class="radio-dot"></span>
+            <span><strong>Deep</strong><small>Review every eligible source file</small></span>
+          </label>
+        </fieldset>
+
+        <div class="review-includes">
+          <span class="field-label">Policy-enforced coverage <app-icon name="lock-keyhole" /></span>
+          <label class="policy-locked"><input type="checkbox" checked disabled /><span><app-icon name="sparkles" />Semantic analysis</span></label>
+          <label class="policy-locked"><input type="checkbox" checked disabled /><span><app-icon name="test-tube-2" />Test evidence</span></label>
+          <label class="policy-locked"><input type="checkbox" checked disabled /><span><app-icon name="workflow" />CI/CD changes</span></label>
+          <small>Eligibility is controlled by language and framework capabilities to preserve review safety.</small>
+        </div>
+
+        <div class="review-actions">
+          <button class="button primary wide" type="button" [disabled]="submitting()" (click)="startReview(false)">
+            <app-icon name="play" />{{ submitting() ? 'Starting…' : 'Run dry review' }}
+          </button>
+          <button class="button secondary wide" type="button" [disabled]="submitting()" (click)="requestPublish()">
+            <app-icon name="rocket" />Publish review
+          </button>
+          <p><app-icon name="shield-check" />Dry run never writes comments to the provider.</p>
+        </div>
+      </section>
+
+      <section class="card context-card">
+        <div class="card-heading"><div><h2>Repository Context</h2><p>Resolved for this pull request.</p></div></div>
+        <dl>
+          <div><dt>Provider</dt><dd>{{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }}</dd></div>
+          <div><dt>Repository</dt><dd>{{ repository().split('/').at(-1) }}</dd></div>
+          <div><dt>Base branch</dt><dd>{{ pullRequest().base_branch }}</dd></div>
+          <div><dt>Head branch</dt><dd>{{ pullRequest().head_branch }}</dd></div>
+          <div><dt>Head commit</dt><dd>{{ pullRequest().head_commit.slice(0, 7) }}</dd></div>
+        </dl>
+      </section>
+    </aside>
+  </div>
+</section>
+
+@if (publishConfirmationOpen()) {
+  <div class="modal-backdrop" role="presentation" (click)="publishConfirmationOpen.set(false)">
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="publish-modal-title" (click)="$event.stopPropagation()">
+      <button class="icon-button modal-close" type="button" aria-label="Close" (click)="publishConfirmationOpen.set(false)"><app-icon name="x" /></button>
+      <span class="modal-icon warning"><app-icon name="message-square-text" /></span>
+      <h2 id="publish-modal-title">Publish review comments?</h2>
+      <p>The engine will write evidence-grounded inline comments and update the review summary for PR #{{ pullRequest().number }}.</p>
+      <div class="publish-summary"><span><app-icon name="shield-check" />Duplicate prevention enabled</span><span><app-icon name="lock-keyhole" />Credentials remain server-side</span></div>
+      <div class="modal-actions"><button class="button secondary" type="button" (click)="publishConfirmationOpen.set(false)">Cancel</button><button class="button danger" type="button" (click)="startReview(true)"><app-icon name="rocket" />Publish review</button></div>
+    </section>
+  </div>
+}

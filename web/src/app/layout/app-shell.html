@@ -1,0 +1,96 @@
+<div
+  class="app-frame"
+  [class.sidebar-collapsed]="sidebarCollapsed()"
+  [class.mobile-nav-open]="mobileNavigationOpen()"
+>
+  <header class="topbar">
+    <a class="brand" routerLink="/" aria-label="Intelligent PR Reviewer dashboard">
+      <span class="brand-mark"><app-icon name="git-pull-request" /></span>
+      <span class="brand-copy">
+        <strong>Intelligent PR Reviewer</strong>
+        <small>Evidence-grounded code review</small>
+      </span>
+    </a>
+
+    <div class="topbar-health" aria-label="Integration health">
+      <span class="health-chip" [class.is-offline]="providerConnected('github') === false">
+        <app-provider-mark provider="github" />
+        <span class="status-dot"></span>
+        GitHub
+        <span class="health-state">
+          {{ providerConnected('github') === null ? 'Checking' : providerConnected('github') ? 'Connected' : 'Not configured' }}
+        </span>
+      </span>
+      <span class="health-chip" [class.is-offline]="providerConnected('azure-devops') === false">
+        <app-provider-mark provider="azure-devops" />
+        <span class="status-dot"></span>
+        Azure
+        <span class="health-state">
+          {{ providerConnected('azure-devops') === null ? 'Checking' : providerConnected('azure-devops') ? 'Connected' : 'Not configured' }}
+        </span>
+      </span>
+      <span class="health-chip" [class.is-offline]="health()?.ollama?.ready === false">
+        <app-icon name="bot" />
+        <span class="status-dot"></span>
+        Ollama
+        <span class="health-state">
+          {{ health()?.ollama?.ready === null || !health() ? 'Checking' : health()?.ollama?.ready ? 'Ready' : 'Offline' }}
+        </span>
+      </span>
+    </div>
+
+    <div class="topbar-actions">
+      <button
+        class="icon-button theme-toggle"
+        type="button"
+        (click)="theme.toggle()"
+        [attr.aria-label]="theme.mode() === 'dark' ? 'Use light theme' : 'Use dark theme'"
+      >
+        <app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" />
+      </button>
+      <button class="profile-button" type="button" aria-label="Open user menu">
+        <span class="avatar">AS</span>
+        <span class="profile-copy"><strong>Abhilash</strong><small>Administrator</small></span>
+        <app-icon name="chevron-down" />
+      </button>
+      <button
+        class="icon-button mobile-menu-button"
+        type="button"
+        aria-label="Open navigation"
+        (click)="toggleMobileNavigation()"
+      >
+        <app-icon name="menu" />
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" aria-label="Primary navigation">
+    <nav>
+      @for (item of navigation; track item.route) {
+        <a
+          class="nav-item"
+          [routerLink]="item.route"
+          routerLinkActive="active"
+          [routerLinkActiveOptions]="{ exact: item.exact }"
+          (click)="closeMobileNavigation()"
+          [attr.title]="sidebarCollapsed() ? item.label : null"
+        >
+          <app-icon [name]="item.icon" />
+          <span>{{ item.label }}</span>
+        </a>
+      }
+    </nav>
+
+  </aside>
+
+  <button
+    class="nav-backdrop"
+    type="button"
+    aria-label="Close navigation"
+    (click)="closeMobileNavigation()"
+  ></button>
+
+  <main class="main-content">
+    <router-outlet />
+  </main>
+</div>

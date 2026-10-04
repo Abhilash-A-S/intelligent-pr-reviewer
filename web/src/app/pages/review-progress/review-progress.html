@@ -1,0 +1,74 @@
+<section class="page review-progress-page">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a routerLink="/">Pull Requests</a><app-icon name="chevron-right" />
+    <span>PR #{{ job().command.pull_number }}</span><app-icon name="chevron-right" />
+    <span>Review</span>
+  </nav>
+
+  <header class="page-heading progress-heading">
+    <div>
+      <h1>Review in progress</h1>
+      <p><span class="job-id">{{ job().id.slice(0, 12).toUpperCase() }}</span><span class="running-pill"><span></span>{{ job().status === 'completed' ? 'Completed' : job().status === 'failed' ? 'Failed' : 'Running' }}</span></p>
+    </div>
+    <div class="heading-actions">
+      <a class="button primary" routerLink="/">Run in background <app-icon name="external-link" /></a>
+      <button class="button ghost-danger" type="button" [disabled]="cancelling() || job().status !== 'queued'" (click)="cancel()">{{ cancelling() ? 'Cancelling…' : 'Cancel review' }}</button>
+    </div>
+  </header>
+
+  @if (error() || job().error) {
+    <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() ?? job().error }}</span></div>
+  }
+
+  <section class="card progress-hero">
+    <div class="progress-title"><strong>Overall progress</strong><b>{{ job().progress }}%</b></div>
+    <div class="progress-track" role="progressbar" [attr.aria-valuenow]="job().progress" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="job().progress"></span></div>
+    <div class="progress-stage-copy"><span>{{ job().phase.replace('_', ' ') }}</span><i></i><span>{{ job().message }}</span></div>
+    <div class="progress-meta"><span><app-icon name="clock-3" /><small>Elapsed time</small><strong>{{ elapsed() }}</strong></span><span><app-icon name="clock-3" /><small>Estimated remaining</small><strong>{{ estimatedRemaining() }}</strong></span></div>
+  </section>
+
+  <ol class="review-stepper horizontal-stepper" aria-label="Review pipeline">
+    @for (step of job().steps; track step.key; let last = $last) {
+      <li [class]="step.state">
+        <span class="step-marker"><app-icon [name]="stepIcon(step.state)" /></span>
+        @if (!last) { <span class="step-line"></span> }
+        <strong>{{ step.label }}</strong>
+      </li>
+    }
+  </ol>
+
+  <div class="progress-metrics">
+    <article class="progress-metric"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ job().result?.diagnostics?.changed_files ?? '—' }}</strong><small>Changed files</small></div></article>
+    <article class="progress-metric teal"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ job().result?.diagnostics?.ai_review_files ?? '—' }}</strong><small>Review files</small></div></article>
+    <article class="progress-metric warning"><span class="metric-icon"><app-icon name="triangle-alert" /></span><div><strong>{{ staticFindingCount() }}</strong><small>Static findings</small></div></article>
+    <article class="progress-metric violet"><span class="metric-icon"><app-icon name="bot" /></span><div><strong>{{ job().result?.diagnostics?.planned_llm_calls ?? '—' }}</strong><small>LLM calls</small></div></article>
+  </div>
+
+  <div class="progress-detail-grid">
+    <section class="card activity-panel">
+      <div class="card-heading"><div><h2>Current activity</h2><p>Processing files and running evidence-grounded review</p></div></div>
+      <ol class="activity-list">
+        @for (step of job().steps; track step.key) {
+          <li [class]="step.state">
+            <span class="activity-state"><app-icon [name]="stepIcon(step.state)" /></span>
+            <div><strong>{{ step.label }}</strong><small>{{ step.message ?? (step.state === 'complete' ? 'Complete' : step.state === 'active' ? job().message : 'Pending') }}</small></div>
+            <em>{{ step.state === 'complete' ? 'Done' : step.state === 'active' ? 'In progress' : 'Pending' }}</em>
+          </li>
+        }
+      </ol>
+    </section>
+
+    <section class="card diagnostics-panel">
+      <div class="card-heading"><div><h2>Live diagnostics</h2><p>Provider-neutral review events</p></div><span class="live-dot"><span></span>Live</span></div>
+      <ol class="diagnostic-events">
+        @for (step of job().steps; track step.key; let index = $index) {
+          <li [class]="step.state"><time>{{ diagnosticTime(index) }}</time><span class="event-state"><app-icon [name]="stepIcon(step.state)" /></span><div><strong>{{ step.label }}</strong><small>{{ step.message ?? statusMessage(step.state) }}</small></div></li>
+        }
+      </ol>
+    </section>
+  </div>
+
+  @if (job().status === 'completed') {
+    <div class="progress-complete-action"><a class="button primary" [routerLink]="['/reviews', job().id, 'results']">View review results <app-icon name="arrow-right" /></a></div>
+  }
+</section>

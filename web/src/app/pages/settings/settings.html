@@ -1,0 +1,77 @@
+<section class="page settings-page">
+  <header class="page-heading">
+    <h1>Settings</h1>
+    <p>Configure providers, review defaults, and runtime behavior</p>
+  </header>
+
+  @if (saved()) { <div class="toast-message success"><app-icon name="check-circle-2" />Settings saved for this browser.</div> }
+
+  <nav class="settings-top-tabs" aria-label="Settings sections">
+    <button type="button" [class.active]="activeTab() === 'integrations'" (click)="activeTab.set('integrations')">Integrations</button>
+    <button type="button" [class.active]="activeTab() === 'review'" (click)="activeTab.set('review')">Review Defaults</button>
+    <button type="button" [class.active]="activeTab() === 'performance'" (click)="activeTab.set('performance')">Performance</button>
+    <button type="button" [class.active]="activeTab() === 'publishing'" (click)="activeTab.set('publishing')">Publishing</button>
+  </nav>
+
+  <div class="settings-dashboard">
+    <div class="settings-column">
+      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'integrations'">
+        <div class="section-heading"><div><h2>Source control providers</h2><p>Connect and manage your source control integrations.</p></div></div>
+
+        <article class="provider-settings-card">
+          <header><span class="integration-logo"><app-provider-mark provider="github" /></span><div><h3>GitHub</h3><p>Pull requests and review comments</p></div><span [class]="connected('github') ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ connected('github') ? 'Connected' : 'Not configured' }}</span></header>
+          <dl><div><dt>Authentication</dt><dd>GITHUB_TOKEN <app-icon name="lock-keyhole" /></dd></div><div><dt>Access</dt><dd>Repository read/write</dd></div></dl>
+          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button">Configure</button></footer>
+        </article>
+
+        <article class="provider-settings-card">
+          <header><span class="integration-logo"><app-provider-mark provider="azure-devops" /></span><div><h3>Azure DevOps</h3><p>Repositories and PR threads</p></div><span [class]="connected('azure-devops') ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ connected('azure-devops') ? 'Connected' : 'Not configured' }}</span></header>
+          <dl><div><dt>Authentication</dt><dd>AZURE_DEVOPS_PAT <app-icon name="lock-keyhole" /></dd></div><div><dt>Access</dt><dd>Code read/write</dd></div></dl>
+          <footer><button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()">Test connection</button><button class="button primary" type="button">Configure</button></footer>
+        </article>
+      </section>
+
+      <section class="card settings-panel ai-provider-panel">
+        <div class="section-heading"><div><h2>AI provider</h2><p>Configure your local or remote AI provider.</p></div></div>
+        <article class="ai-provider-card">
+          <header><span class="integration-logo"><app-icon name="bot" /></span><div><h3>Ollama</h3><p>Local AI provider</p></div><span [class]="health()?.ollama?.ready ? 'connection-pill connected' : 'connection-pill disconnected'"><span></span>{{ health()?.ollama?.ready ? 'Ready' : 'Unavailable' }}</span></header>
+          <dl><div><dt>Model</dt><dd>{{ health()?.ollama?.model ?? 'qwen2.5-coder:7b' }}</dd></div><div><dt>Endpoint</dt><dd>{{ health()?.ollama?.base_url ?? 'http://localhost:11434' }}</dd></div><div><dt>Timeout</dt><dd>300 seconds</dd></div></dl>
+          <button class="button secondary" type="button" [disabled]="checking()" (click)="loadHealth()"><app-icon name="play" />Test model</button>
+        </article>
+      </section>
+    </div>
+
+    <div class="settings-column">
+      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'review'">
+        <div class="section-heading"><div><h2>Review defaults</h2><p>Set default behavior for pull request reviews.</p></div></div>
+        <div class="compact-settings-form">
+          <fieldset class="compact-depth"><legend>Review depth</legend><div>@for (option of depthOptions; track option.value) { <label [class.selected]="preferences.defaultDepth() === option.value"><input type="radio" name="defaultDepth" [value]="option.value" [checked]="preferences.defaultDepth() === option.value" (change)="setDefaultDepth(option.value)" /><span>{{ option.label }}</span></label> }</div></fieldset>
+          <label class="inline-toggle policy-setting"><span><strong>Static analysis</strong><small>Code quality, security, and best practices</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Semantic AI review</strong><small>Used only where semantic analysis adds value</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Tests and CI</strong><small>Test evidence and workflow changes remain reviewable</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="field"><span>Default mode</span><div class="select-shell"><select disabled><option>Dry run</option></select><app-icon name="lock-keyhole" /></div><small>Publishing always requires explicit confirmation.</small></label>
+        </div>
+      </section>
+
+      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'publishing'">
+        <div class="section-heading"><div><h2>Publishing controls</h2><p>Configure how review results are published.</p></div></div>
+        <div class="compact-settings-form">
+          <label class="field policy-setting"><span>Maximum inline comments <app-icon name="lock-keyhole" /></span><div class="input-shell"><input type="number" value="40" disabled /></div></label>
+          <label class="inline-toggle policy-setting"><span><strong>Confirmation before publish</strong><small>Required before writing provider comments</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Duplicate prevention</strong><small>Avoid duplicate reviews for the same PR</small></span><input type="checkbox" checked disabled /><i></i></label>
+          <label class="inline-toggle policy-setting"><span><strong>Summary comment</strong><small>Post key findings in one updateable summary</small></span><input type="checkbox" checked disabled /><i></i></label>
+        </div>
+      </section>
+
+      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'performance'">
+        <div class="section-heading"><div><h2>Performance</h2><p>Adjust bounded runtime concurrency.</p></div></div>
+        <div class="compact-settings-form">
+          <label class="number-setting"><span><strong>Parallel workers</strong><small>Maximum concurrent review batches</small></span><input type="number" min="1" max="8" [ngModel]="preferences.maxWorkers()" (ngModelChange)="preferences.maxWorkers.set(+$event)" /></label>
+          <div class="runtime-summary"><strong>Runtime health</strong><p><span><i [class.offline]="!health()"></i>Provider API</span><span><i [class.offline]="!health()"></i>Review engine</span><span><i [class.offline]="!health()?.ollama?.ready"></i>Ollama</span></p></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="settings-actions"><button class="button secondary" type="button">Discard changes</button><button class="button primary" type="button" (click)="save()">Save settings</button></div>
+</section>
