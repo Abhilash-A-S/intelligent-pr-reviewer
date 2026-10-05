@@ -8,12 +8,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(scriptDirectory, '..');
 const projectRoot = resolve(webRoot, '..');
 const temporaryOutput = mkdtempSync(join(tmpdir(), 'ipr-ui-build-'));
-const angularExecutable = join(
-  webRoot,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'ng.cmd' : 'ng',
-);
+const angularCli = join(webRoot, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
 const destination = join(projectRoot, 'src', 'pr_reviewer', 'web', 'static');
 
 function collectReferencedAssets(browserOutput) {
@@ -58,12 +53,24 @@ function collectFiles(directory) {
 }
 
 try {
+  if (!existsSync(angularCli)) {
+    throw new Error(
+      `Angular CLI was not found at ${angularCli}. Run npm install in the web directory first.`,
+    );
+  }
   const build = spawnSync(
-    angularExecutable,
-    ['build', `--output-path=${temporaryOutput}`],
+    process.execPath,
+    [angularCli, 'build', `--output-path=${temporaryOutput}`],
     { cwd: webRoot, stdio: 'inherit' },
   );
-  if (build.status !== 0) process.exit(build.status ?? 1);
+  if (build.error) {
+    throw new Error(`Angular build could not be started: ${build.error.message}`, {
+      cause: build.error,
+    });
+  }
+  if (build.status !== 0) {
+    throw new Error(`Angular build failed with exit code ${build.status ?? 'unknown'}.`);
+  }
 
   const browserOutput = join(temporaryOutput, 'browser');
   if (!existsSync(join(browserOutput, 'index.html'))) {
