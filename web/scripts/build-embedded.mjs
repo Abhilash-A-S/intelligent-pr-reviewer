@@ -15,6 +15,7 @@ function collectReferencedAssets(browserOutput) {
   const assets = new Set(['index.html']);
   const queue = ['index.html'];
   const htmlAssetPattern = /(?:src|href)=["']([^"'?#]+)["']/g;
+  const cssAssetPattern = /url\(\s*[\"']?([^\"')?#]+)[\"']?\s*\)/g;
   const modulePattern = /["']\.\/([^"'?#]+\.js)["']/g;
 
   while (queue.length) {
@@ -23,12 +24,12 @@ function collectReferencedAssets(browserOutput) {
     if (!existsSync(sourcePath)) {
       throw new Error(`Angular output references a missing asset: ${relativePath}`);
     }
-    if (!relativePath.endsWith('.html') && !relativePath.endsWith('.js')) continue;
+    if (!/\.(html|js|css)$/.test(relativePath)) continue;
 
     const content = readFileSync(sourcePath, 'utf8');
     const patterns = relativePath.endsWith('.html')
       ? [htmlAssetPattern, modulePattern]
-      : [modulePattern];
+      : relativePath.endsWith('.css') ? [cssAssetPattern] : [modulePattern];
     for (const pattern of patterns) {
       pattern.lastIndex = 0;
       for (const match of content.matchAll(pattern)) {

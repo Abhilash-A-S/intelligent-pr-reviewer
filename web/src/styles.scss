@@ -1,3 +1,7 @@
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
 :root {
   --bg: #f6f8fc;
   --surface: #ffffff;
@@ -5528,4 +5532,29 @@ select:focus-visible {
     font-size: 7.5px;
     line-height: 1.1;
   }
+}
+
+/* Shared shell proportions from the review-results reference. */
+@media (min-width: 761px) {
+  :root { --sidebar-width: 160px; --topbar-height: 50px; }
+  .topbar { padding-inline: 15px; }
+  .brand { width: auto; }
+  .brand-mark { width: 25px; height: 25px; }
+  .brand-copy strong { font-size: 14px; }
+  .brand-copy small { display: none; }
+  .topbar-actions { flex: 1; justify-content: flex-end; }
+  .topbar-health { margin-inline: auto; }
+  .health-chip { min-height: 34px; font-size: 10px; gap: 5px; }
+  .health-state { font-size: 10px; font-weight: 500; color: var(--text-secondary); }
+  .profile-copy, .profile-button > .app-icon { display: none; }
+  .avatar { width: 28px; height: 28px; }
+  .sidebar { padding: 7px 0; }
+  .nav-item { margin: 0 13px 5px 0; padding: 9px 18px; border-radius: 0 6px 6px 0; font-size: 11px; }
+}
+:root[data-theme='dark'] { --bg: #0c1523; --surface: #101c2b; --surface-subtle: #142030; --border: #203043; --surface-hover: #202d40; }
+
+@media (min-width: 761px) {
+  .health-state { display: inline; }
+  .brand-mark { flex-basis: 25px; font-size: 16px; }
+  .nav-item { font-weight: 500; height: 36px; }
 }

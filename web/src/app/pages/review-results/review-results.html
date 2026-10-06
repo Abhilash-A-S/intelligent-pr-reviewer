@@ -14,18 +14,18 @@
     @if (job(); as currentJob) {
       <nav class="breadcrumb" aria-label="Breadcrumb">
         <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span
-          >#{{ reviewResult.pull_request.number }}</span
-        ><app-icon name="chevron-right" /><span>Review results</span>
+          >PR #{{ reviewResult.pull_request.number }}</span
+        ><app-icon name="chevron-right" /><span>Results</span>
       </nav>
 
-      <header class="page-heading results-heading sticky-page-heading">
+      <header class="page-heading results-heading">
         <div>
           <h1>Review results</h1>
           <p class="result-meta">
-            Job ID: {{ currentJob.id.slice(0, 12).toUpperCase() }} <i></i> Completed
+            Job ID: {{ currentJob.id.toUpperCase() }} <i></i> Completed
             {{ completedLabel() }}
-            <span class="result-decision"
-              ><app-icon name="octagon-alert" />{{
+            <span class="result-decision" [class.pass]="decisionLabel() === 'PASS'" [class.warning]="decisionLabel() !== 'BLOCK' && decisionLabel() !== 'PASS'"
+              ><app-icon [name]="decisionLabel() === 'BLOCK' ? 'ban' : 'shield-check'" />{{
                 decisionLabel() === 'BLOCK' ? 'Block merge' : decisionLabel()
               }}</span
             >
@@ -41,132 +41,78 @@
 
       <div class="severity-grid">
         <article class="severity-card critical">
-          <span><app-icon name="octagon-alert" /></span>
+          <span><app-icon name="circle-alert" /></span>
           <div>
             <small>Critical</small><strong>{{ reviewResult.quality_gate.critical_count }}</strong>
           </div>
         </article>
         <article class="severity-card high">
-          <span><app-icon name="triangle-alert" /></span>
+          <span><app-icon name="circle-arrow-up" /></span>
           <div>
             <small>High</small><strong>{{ reviewResult.quality_gate.high_count }}</strong>
           </div>
         </article>
         <article class="severity-card medium">
-          <span><app-icon name="circle-alert" /></span>
+          <span><app-icon name="triangle-alert" /></span>
           <div>
             <small>Medium</small><strong>{{ reviewResult.quality_gate.medium_count }}</strong>
           </div>
         </article>
         <article class="severity-card low">
-          <span><app-icon name="circle-dot" /></span>
+          <span><app-icon name="info" /></span>
           <div>
             <small>Low</small><strong>{{ reviewResult.quality_gate.low_count }}</strong>
           </div>
         </article>
         <article class="severity-card total">
-          <span><app-icon name="list-filter" /></span>
+          <span><app-icon name="file-text" /></span>
           <div>
             <small>Total</small><strong>{{ totalFindings() }}</strong>
           </div>
         </article>
       </div>
 
-      <section class="run-metadata">
-        <div>
-          <span>Changed files</span><strong>{{ reviewResult.diagnostics.changed_files }}</strong>
-        </div>
-        <div>
-          <span>Static findings</span
-          ><strong>{{ totalFindings() - reviewResult.diagnostics.final_ai_findings }}</strong>
-        </div>
-        <div>
-          <span>AI findings</span><strong>{{ reviewResult.diagnostics.final_ai_findings }}</strong>
-        </div>
-        <div>
-          <span>Review time</span
-          ><strong>{{ reviewResult.diagnostics.total_review_seconds | number: '1.2-2' }}s</strong>
-        </div>
-        <div>
-          <span>Review depth</span
-          ><strong class="capitalize">{{ reviewResult.diagnostics.review_depth }}</strong>
-        </div>
+      <section class="run-metadata" aria-label="Review metrics">
+        <div><app-icon name="files" /><span><strong>{{ reviewResult.diagnostics.changed_files }}</strong> changed files</span></div>
+        <div><app-icon name="search" /><span><strong>{{ totalFindings() - reviewResult.diagnostics.final_ai_findings }}</strong> static findings</span></div>
+        <div><app-icon name="cpu" /><span><strong>{{ reviewResult.diagnostics.final_ai_findings }}</strong> AI finding{{ reviewResult.diagnostics.final_ai_findings === 1 ? '' : 's' }}</span></div>
+        <div [attr.title]="'Review depth: ' + reviewResult.diagnostics.review_depth"><app-icon name="clock-3" /><span><strong>{{ durationLabel() }}</strong> review time</span></div>
       </section>
 
       <div class="results-layout">
         <div class="findings-column">
-          <section class="card findings-toolbar">
-            <div>
+          <section class="card findings-panel">
+            <div class="findings-toolbar">
               <h2>Findings ({{ totalFindings() }})</h2>
-              <p>{{ visibleFindings().length }} visible evidence-grounded findings</p>
+              <label class="search-field findings-search"><app-icon name="search" /><input type="search" aria-label="Search findings" placeholder="Search findings..." [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
+              <div class="findings-filter-grid">
+                <label><span>Severity</span><app-smart-select [options]="severityOptions" [value]="severity()" ariaLabel="Filter by severity" (valueChange)="setSeverity($event)" /></label>
+                <label><span>Source</span><app-smart-select [options]="sourceOptions" [value]="source()" ariaLabel="Filter by finding source" (valueChange)="setSource($event)" /></label>
+                <label><span>Project</span><app-smart-select [options]="projectOptions()" [value]="project()" ariaLabel="Filter by project" (valueChange)="project.set($event)" /></label>
+                <label><span>Rule</span><app-smart-select [options]="ruleOptions()" [value]="rule()" ariaLabel="Filter by rule" (valueChange)="rule.set($event)" /></label>
+              </div>
             </div>
-            <div class="toolbar-controls">
-              <label class="search-field"
-                ><app-icon name="search" /><input
-                  type="search"
-                  placeholder="Search findings"
-                  [ngModel]="search()"
-                  (ngModelChange)="search.set($event)"
-              /></label>
-              <app-smart-select
-                [options]="severityOptions"
-                [value]="severity()"
-                ariaLabel="Filter by severity"
-                (valueChange)="setSeverity($event)"
-              />
-              <app-smart-select
-                [options]="sourceOptions"
-                [value]="source()"
-                ariaLabel="Filter by finding source"
-                (valueChange)="setSource($event)"
-              />
-            </div>
-          </section>
-
           <div class="finding-list">
             @for (
               finding of visibleFindings();
               track finding.file_path + ':' + finding.line_number + ':' + finding.rule_id
             ) {
-              <article class="finding-card" [class]="'finding-card ' + finding.severity">
-                <header>
-                  <span class="finding-severity"
-                    ><app-icon [name]="severityIcon(finding.severity)" />{{
-                      finding.severity
-                    }}</span
-                  ><span class="finding-source">{{ finding.source }}</span
-                  ><button class="icon-button" type="button" aria-label="Finding actions">
-                    <app-icon name="more-horizontal" />
-                  </button>
-                </header>
-                <div class="finding-location">
-                  <app-icon name="file-code-2" /><strong>{{ finding.file_path }}</strong
-                  ><span>Line {{ finding.line_number }}</span
-                  ><code>{{ finding.rule_id }}</code>
-                </div>
-                <h3>{{ findingIssue(finding) }}</h3>
-                <dl class="finding-detail">
-                  @if (finding.impact) {
-                    <div>
-                      <dt>Impact</dt>
-                      <dd>{{ finding.impact }}</dd>
-                    </div>
-                  }
-                  @if (finding.evidence) {
-                    <div class="evidence">
-                      <dt>Evidence</dt>
-                      <dd>
-                        <code>{{ finding.evidence }}</code>
-                      </dd>
-                    </div>
-                  }
-                  @if (finding.suggestion) {
-                    <div class="suggestion">
-                      <dt>Suggestion</dt>
-                      <dd>{{ finding.suggestion }}</dd>
-                    </div>
-                  }
-                </dl>
+              <article [class]="'finding-card ' + finding.severity" [class.expanded]="isExpanded(finding)">
+                <button class="finding-summary" type="button" [attr.aria-expanded]="isExpanded(finding)" [attr.aria-controls]="'finding-' + $index" (click)="toggleFinding(finding)">
+                  <span class="finding-severity"><app-icon [name]="severityIcon(finding.severity)" />{{ finding.severity }}</span>
+                  <span class="finding-summary-copy"><strong>{{ finding.rule_id }}</strong><small [attr.title]="finding.file_path">{{ filename(finding.file_path) }}:{{ finding.line_number }} <i></i> <span class="capitalize">{{ finding.category ?? 'Code quality' }}</span></small></span>
+                  <span class="finding-source">{{ finding.source === 'llm' ? 'AI' : finding.source }}</span>
+                  <app-icon class="finding-chevron" [name]="isExpanded(finding) ? 'chevron-up' : 'chevron-down'" />
+                </button>
+                @if (isExpanded(finding)) {
+                  <div class="finding-expanded" [id]="'finding-' + $index">
+                    <section><h3>Issue</h3><p>{{ findingIssue(finding) }}</p></section>
+                    @if (finding.impact) { <section><h3>Impact</h3><p>{{ finding.impact }}</p></section> }
+                    @if (finding.evidence) { <section><h3>Evidence</h3><div class="evidence-code"><div class="evidence-lines">@for (line of evidenceLines(finding); track $index) { <div class="evidence-line" [class.changed]="line.number === finding.line_number"><span>{{ line.number }}</span><code>{{ line.text }}</code></div> }</div><button type="button" aria-label="Copy evidence" (click)="copyEvidence(finding)"><app-icon name="copy" /></button></div></section> }
+                    @if (finding.suggestion) { <section><h3>Suggestion</h3><p>{{ finding.suggestion }}</p></section> }
+                    <button class="finding-collapse" type="button" aria-label="Collapse finding" (click)="toggleFinding(finding)"><app-icon name="chevron-up" /></button>
+                  </div>
+                }
               </article>
             } @empty {
               <div class="card empty-state">
@@ -181,22 +127,20 @@
               </div>
             }
           </div>
+          </section>
+          <span class="copy-status" role="status">{{ copyStatus() }}</span>
         </div>
 
         <aside class="results-sidebar">
           <section class="card gate-card">
-            <div class="card-heading">
-              <div>
-                <h2>Quality gate</h2>
-                <p>Merge recommendation</p>
-              </div>
-              <span class="gate-icon"><app-icon name="shield-check" /></span>
+            <h2>Quality Gate</h2>
+            <div class="quality-gate-banner" [class.pass]="decisionLabel() === 'PASS'" [class.warning]="decisionLabel() !== 'BLOCK' && decisionLabel() !== 'PASS'">
+              <app-icon [name]="decisionLabel() === 'BLOCK' ? 'ban' : 'shield-check'" />
+              <div><strong>{{ decisionLabel() === 'BLOCK' ? 'Block Merge' : decisionLabel() === 'PASS' ? 'Ready to Merge' : decisionLabel() }}</strong><small>{{ gateDescription() }}</small></div>
             </div>
-            <strong class="gate-decision">{{ decisionLabel() }}</strong>
-            <ul>
-              <li><app-icon name="check" />Deterministic rules evaluated</li>
-              <li><app-icon name="check" />Evidence validation completed</li>
-              <li><app-icon name="check" />Root causes deduplicated</li>
+            <h3>Findings by severity</h3>
+            <ul class="severity-bars">
+              @for (level of severities; track level) { <li [class]="level"><span>{{ level }}</span><i><b [style.width.%]="totalFindings() ? severityCount(level) / totalFindings() * 100 : 0"></b></i><strong>{{ severityCount(level) }}</strong></li> }
             </ul>
           </section>
 
@@ -220,20 +164,11 @@
                 }}</small>
               </div>
             </div>
-            <dl>
-              <div>
-                <dt>Inline comments</dt>
-                <dd>{{ reviewResult.publishing.published_comments.length }}</dd>
-              </div>
-              <div>
-                <dt>Duplicates skipped</dt>
-                <dd>{{ reviewResult.publishing.skipped_duplicates }}</dd>
-              </div>
-              <div>
-                <dt>Summary-only</dt>
-                <dd>{{ reviewResult.publishing.summary_only_findings }}</dd>
-              </div>
-            </dl>
+            <ul class="publishing-stats">
+              <li><app-icon name="message-square-text" /><span><strong>{{ reviewResult.publishing.published_comments.length }}</strong> inline comments</span></li>
+              <li><app-icon name="git-branch" /><span><strong>{{ reviewResult.publishing.skipped_duplicates }}</strong> duplicates skipped</span></li>
+              <li [class.has-failures]="reviewResult.publishing.failed_comments.length > 0"><app-icon name="triangle-alert" /><span><strong>{{ reviewResult.publishing.failed_comments.length }}</strong> failures</span></li>
+            </ul>
             @if (reviewResult.dry_run) {
               <button
                 class="button primary wide"
@@ -241,7 +176,7 @@
                 [disabled]="publishing()"
                 (click)="publishConfirmationOpen.set(true)"
               >
-                <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish review' }}
+                <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish to PR' }}
               </button>
             }
             <button class="button secondary wide" type="button" (click)="downloadJson()">
@@ -250,26 +185,8 @@
           </section>
 
           <section class="card rejected-card">
-            <div class="card-heading">
-              <div>
-                <h2>Rejected AI findings</h2>
-                <p>Low-confidence output removed</p>
-              </div>
-              <strong>{{ rejectedAiFindings() }}</strong>
-            </div>
-            <p>
-              The validation pipeline rejected speculative or duplicate semantic findings before the
-              quality gate.
-            </p>
-            <div class="rejection-bar">
-              <span
-                [style.width.%]="
-                  reviewResult.diagnostics.raw_ai_findings
-                    ? (rejectedAiFindings() / reviewResult.diagnostics.raw_ai_findings) * 100
-                    : 0
-                "
-              ></span>
-            </div>
+            <button type="button" [attr.aria-expanded]="rejectedOpen()" aria-controls="rejected-content" (click)="rejectedOpen.set(!rejectedOpen())">Rejected AI findings ({{ rejectedAiFindings() }})<app-icon [name]="rejectedOpen() ? 'chevron-up' : 'chevron-down'" /></button>
+            @if (rejectedOpen()) { <div class="rejected-content" id="rejected-content"><p>The validation pipeline rejected speculative or duplicate semantic findings before the quality gate.</p></div> }
           </section>
         </aside>
       </div>
