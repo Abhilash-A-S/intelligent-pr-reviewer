@@ -1,420 +1,88 @@
 <section class="page pr-details-page">
   @if (loading()) {
-    <nav class="breadcrumb" aria-label="Breadcrumb">
-      <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span>Loading</span>
-    </nav>
-    <section class="card route-state-card" aria-live="polite">
-      <span class="empty-illustration loading"><app-icon name="loader-circle" /></span>
-      <h1>Loading pull request</h1>
-      <p>
-        Retrieving metadata and changed files from
-        {{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }}.
-      </p>
-    </section>
+    <section class="card route-state-card" aria-live="polite"><span class="empty-illustration loading"><app-icon name="loader-circle" /></span><h1>Loading pull request</h1><p>Retrieving metadata and changed files.</p></section>
   } @else if (pullRequest(); as pr) {
-    <nav class="breadcrumb" aria-label="Breadcrumb">
-      <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span
-        >#{{ pr.number }}</span
-      >
-    </nav>
-
-    <header
-      class="page-heading pr-heading sticky-page-heading"
-      data-testid="pull-request-context-header"
-    >
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a routerLink="/">Pull Requests</a><span>/</span><span>PR #{{ pr.number }}</span></nav>
+    <header class="page-heading pr-heading heading-with-action sticky-page-heading" data-testid="pull-request-context-header">
       <div class="pr-heading-main">
-        <div class="title-line">
-          <h1>{{ pr.title }}</h1>
-          <span class="state-pill"><span></span>{{ pr.state || 'Unknown' }}</span>
-        </div>
+        <div class="title-line"><h1>{{ pr.title }}</h1><span class="state-pill">{{ pr.state === 'open' || pr.state === 'active' ? 'Active' : pr.state }}</span></div>
         <div class="pr-meta-line">
-          <span class="author"
-            ><span class="mini-avatar">{{ authorInitials(pr.author) }}</span
-            >{{ pr.author }}</span
-          >
-          <span><app-provider-mark [provider]="provider()" />{{ repository() }}</span>
+          <span class="author"><span class="mini-avatar">{{ authorInitials(pr.author) }}</span><strong>{{ pr.author }}</strong></span>
+          <span [attr.title]="repository()"><app-icon name="database" /><strong>{{ repositoryName() }}</strong><span class="sr-only">{{ repository() }}</span></span>
           <span><app-icon name="git-branch" />{{ pr.head_branch }} → {{ pr.base_branch }}</span>
-          <span title="Head commit"
-            ><app-icon name="code-2" />{{ pr.head_commit.slice(0, 9) }}</span
-          >
+          <span title="Head commit"><app-icon name="code-2" />{{ pr.head_commit.slice(0, 7) }}</span>
+          <span class="header-file-count"><app-icon name="file-text" />{{ files().length }} changed files</span>
         </div>
       </div>
-      <div class="pr-heading-side">
-        <span class="file-count"
-          ><strong>{{ files().length }}</strong
-          ><small>changed files</small></span
-        >
-      </div>
+      <div class="heading-actions"><button class="button primary" type="button" [disabled]="submitting()" (click)="startReview(false)"><app-icon name="play" />{{ submitting() ? 'Starting…' : 'Run Dry Review' }}</button><button class="button publish-outline" type="button" [disabled]="submitting()" (click)="requestPublish()"><app-icon name="external-link" />Publish Review</button></div>
     </header>
-
-    @if (error()) {
-      <div class="inline-alert warning-alert" role="status">
-        <app-icon name="triangle-alert" /><span>{{ error() }}</span>
-      </div>
-    }
-
+    @if (error()) { <div class="inline-alert warning-alert" role="alert"><app-icon name="triangle-alert" /><span>{{ error() }}</span></div> }
     <div class="details-layout">
       <div class="details-main">
-        <div class="tab-list" role="tablist">
-          <button
-            type="button"
-            [class.active]="activeTab() === 'overview'"
-            (click)="activeTab.set('overview')"
-          >
-            Overview
-          </button>
-          <button
-            type="button"
-            [class.active]="activeTab() === 'files'"
-            (click)="activeTab.set('files')"
-          >
-            Changed files <span>{{ files().length }}</span>
-          </button>
-          <button
-            type="button"
-            [class.active]="activeTab() === 'commits'"
-            (click)="activeTab.set('commits')"
-          >
-            Commits
-            @if (pr.commit_count !== null && pr.commit_count !== undefined) {
-              <span>{{ pr.commit_count }}</span>
-            }
-          </button>
-        </div>
-
+        <nav class="tab-list" aria-label="Pull request sections">
+          <button type="button" [class.active]="activeTab() === 'overview'" [attr.aria-pressed]="activeTab() === 'overview'" (click)="activeTab.set('overview')">Overview</button>
+          <button type="button" [class.active]="activeTab() === 'files'" [attr.aria-pressed]="activeTab() === 'files'" (click)="activeTab.set('files')">Changed Files</button>
+          <button type="button" [class.active]="activeTab() === 'commits'" [attr.aria-pressed]="activeTab() === 'commits'" (click)="activeTab.set('commits')">Commits</button>
+        </nav>
         @if (activeTab() === 'overview') {
-          <section class="card overview-card">
-            <div class="card-heading">
-              <div>
-                <h2>Pull request overview</h2>
-                <p>Change intent and scope supplied by the author.</p>
-              </div>
-              <button class="icon-button" type="button" aria-label="More pull request actions">
-                <app-icon name="more-horizontal" />
-              </button>
-            </div>
-            <p class="description">
-              {{ pr.description || 'No pull request description was provided.' }}
-            </p>
-            <div class="change-summary">
-              <div>
-                <span class="change-icon files"><app-icon name="file-diff" /></span
-                ><span
-                  ><strong>{{ files().length }}</strong
-                  ><small>Files changed</small></span
-                >
-              </div>
-              <div>
-                <span class="change-icon additions">+</span
-                ><span
-                  ><strong>{{ additions() ?? '—' }}</strong
-                  ><small>Additions</small></span
-                >
-              </div>
-              <div>
-                <span class="change-icon deletions">−</span
-                ><span
-                  ><strong>{{ deletions() ?? '—' }}</strong
-                  ><small>Deletions</small></span
-                >
-              </div>
-              <div>
-                <span class="change-icon commits"><app-icon name="git-branch" /></span
-                ><span
-                  ><strong>{{ pr.commit_count ?? '—' }}</strong
-                  ><small>Commits</small></span
-                >
-              </div>
-            </div>
-          </section>
-
+          <section class="card overview-card"><p class="description">{{ pr.description || 'No pull request description was provided.' }}</p></section>
+          <div class="change-summary" aria-label="Change summary">
+            <article><span class="change-icon files"><app-icon name="file-text" /></span><div><strong>{{ files().length }}</strong><small>Files</small></div></article>
+            <article><span class="change-icon additions"><app-icon name="arrow-right" /></span><div><strong class="positive">{{ additions() === null ? '—' : '+' + additions() }}</strong><small>Added</small></div></article>
+            <article><span class="change-icon deletions"><app-icon name="arrow-right" /></span><div><strong class="negative">{{ deletions() === null ? '—' : '-' + deletions() }}</strong><small>Removed</small></div></article>
+            <article title="Project groups inferred from apps, packages, projects or services paths; other files belong to this repository."><span class="change-icon projects"><app-icon name="layout-dashboard" /></span><div><strong>{{ projectCount() }}</strong><small>Projects</small></div></article>
+          </div>
+        }
+        @if (activeTab() !== 'commits') {
           <section class="card data-card changed-files-card">
-            <div class="table-toolbar">
-              <div>
-                <h2>Changed files</h2>
-                <p>Application files eligible for review and context.</p>
-              </div>
-              <button class="button subtle" type="button" (click)="activeTab.set('files')">
-                View all files <app-icon name="arrow-right" />
-              </button>
-            </div>
-            <div class="table-scroll">
-              <table class="data-table files-table">
-                <thead>
-                  <tr>
-                    <th>File</th>
-                    <th>Status</th>
-                    <th>Language</th>
-                    <th>Changed lines</th>
-                    <th>Diff</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (file of files().slice(0, 5); track file.file_path) {
-                    <tr>
-                      <td>
-                        <span class="file-name"
-                          ><span class="file-icon"><app-icon name="file-code-2" /></span
-                          >{{ file.file_path }}</span
-                        >
-                      </td>
-                      <td>
-                        <span [class]="statusClass(file.status)">{{ file.status }}</span>
-                      </td>
-                      <td>{{ file.language ?? 'Unknown' }}</td>
-                      <td>{{ file.changed_line_count }}</td>
-                      <td>
-                        <span class="diff-stat"
-                          ><b>+{{ file.additions ?? '—' }}</b
-                          ><em>−{{ file.deletions ?? '—' }}</em></span
-                        >
-                      </td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td colspan="5">
-                        <div class="empty-state compact">
-                          <app-icon name="file-diff" /><strong>No changed files returned</strong
-                          ><span>The provider reported an empty change set.</span>
-                        </div>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          </section>
-        } @else if (activeTab() === 'files') {
-          <section class="card data-card changed-files-card">
-            <div class="table-toolbar">
-              <div>
-                <h2>All changed files</h2>
-                <p>{{ files().length }} files from the pull request head.</p>
-              </div>
-            </div>
-            <div class="file-list">
-              @for (file of files(); track file.file_path) {
-                <div class="file-list-row">
-                  <span class="file-icon"><app-icon name="file-code-2" /></span
-                  ><span
-                    ><strong>{{ file.file_path }}</strong
-                    ><small
-                      >{{ file.language ?? 'Unknown' }} · {{ file.changed_line_count }} changed
-                      lines</small
-                    ></span
-                  ><span [class]="statusClass(file.status)">{{ file.status }}</span>
-                </div>
-              } @empty {
-                <div class="empty-state">
-                  <app-icon name="file-diff" /><strong>No changed files returned</strong
-                  ><span>The provider reported an empty change set.</span>
-                </div>
-              }
-            </div>
+            <div class="table-toolbar"><h2>Changed Files ({{ files().length }})</h2></div>
+            <div class="table-scroll"><table class="data-table files-table">
+              <thead><tr><th>File</th><th>Status</th><th>+ / -</th><th>Project</th></tr></thead>
+              <tbody>@for (file of (activeTab() === 'overview' ? files().slice(0, 8) : files()); track file.file_path) {
+                <tr><td><span class="file-name"><span [class]="'file-kind ' + fileType(file)">@switch (fileType(file)) { @case ('ts') { TS } @case ('js') { JS } @case ('react') { <app-icon name="atom" /> } @case ('test') { <app-icon name="flask-conical" /> } @default { <app-icon name="file-code-2" /> } }</span><span [attr.title]="file.file_path">{{ file.file_path }}</span></span></td>
+                  <td><span [class]="statusClass(file.status)">{{ file.status }}</span></td>
+                  <td><span class="diff-stat"><b>+{{ file.additions ?? '—' }}</b><em>-{{ file.deletions ?? '—' }}</em></span></td>
+                  <td><span class="project-name" [attr.title]="fileProject(file)">{{ fileProject(file) }}</span></td>
+                </tr>
+              } @empty { <tr><td colspan="4"><div class="empty-state compact"><app-icon name="file-diff" /><strong>No changed files returned</strong></div></td></tr> }</tbody>
+            </table></div>
+            <footer class="table-footer"><span>Showing {{ activeTab() === 'overview' ? Math.min(files().length, 8) : files().length }} of {{ files().length }} files</span>@if (activeTab() === 'overview' && files().length > 8) { <button type="button" (click)="activeTab.set('files')">View all</button> }</footer>
           </section>
         } @else {
-          <section class="card placeholder-card">
-            <span class="empty-illustration"><app-icon name="git-branch" /></span>
-            <h2>
-              {{
-                pr.commit_count !== null && pr.commit_count !== undefined
-                  ? pr.commit_count + ' commits'
-                  : 'Commit list not available'
-              }}
-            </h2>
-            <p>
-              The provider supplied the pull-request head commit. Individual commit listing is not
-              required by the review engine.
-            </p>
-          </section>
+          <section class="card commits-card"><h2>Commits{{ pr.commit_count == null ? '' : ' (' + pr.commit_count + ')' }}</h2><p>The provider exposes the head commit below. Individual commit history is not available from this API.</p><div class="commit-row"><app-icon name="git-branch" /><code>{{ pr.head_commit }}</code><button class="icon-button" type="button" aria-label="Copy head commit" (click)="copyCommit()"><app-icon name="copy" /></button></div></section>
         }
       </div>
-
       <aside class="details-sidebar">
         <section class="card start-review-card">
-          <div class="card-heading">
-            <div>
-              <h2>Start review</h2>
-              <p>Configure the depth and output.</p>
-            </div>
-            <span class="ai-mark"><app-icon name="bot" /></span>
-          </div>
-          <fieldset class="depth-options">
-            <legend>Review depth</legend>
-            <label [class.selected]="depth() === 'fast'"
-              ><input
-                type="radio"
-                name="depth"
-                value="fast"
-                [checked]="depth() === 'fast'"
-                (change)="setDepth('fast')"
-              /><span class="radio-dot"></span
-              ><span
-                ><strong>Fast</strong><small>Deterministic first, minimum LLM calls</small></span
-              ></label
-            >
-            <label [class.selected]="depth() === 'standard'"
-              ><input
-                type="radio"
-                name="depth"
-                value="standard"
-                [checked]="depth() === 'standard'"
-                (change)="setDepth('standard')"
-              /><span class="radio-dot"></span
-              ><span><strong>Standard</strong><small>Balanced coverage and performance</small></span
-              ><em>Recommended</em></label
-            >
-            <label [class.selected]="depth() === 'deep'"
-              ><input
-                type="radio"
-                name="depth"
-                value="deep"
-                [checked]="depth() === 'deep'"
-                (change)="setDepth('deep')"
-              /><span class="radio-dot"></span
-              ><span
-                ><strong>Deep</strong><small>Review every eligible source file</small></span
-              ></label
-            >
+          <h2>Start Review</h2>
+          <fieldset class="depth-options"><legend>Review depth</legend>
+            <label [class.selected]="depth() === 'fast'"><input type="radio" name="depth" value="fast" [checked]="depth() === 'fast'" (change)="setDepth('fast')" /><span class="radio-dot"></span><span><strong>Fast</strong><small>Quick checks, basic feedback</small></span></label>
+            <label [class.selected]="depth() === 'standard'"><input type="radio" name="depth" value="standard" [checked]="depth() === 'standard'" (change)="setDepth('standard')" /><span class="radio-dot"></span><span><strong>Standard</strong><small>Balanced, most common</small></span></label>
+            <label [class.selected]="depth() === 'deep'"><input type="radio" name="depth" value="deep" [checked]="depth() === 'deep'" (change)="setDepth('deep')" /><span class="radio-dot"></span><span><strong>Deep</strong><small>In-depth analysis, longer runtime</small></span></label>
           </fieldset>
-          <div class="review-includes">
-            <span class="field-label"
-              >Policy-enforced coverage <app-icon name="lock-keyhole"
-            /></span>
-            <label class="policy-locked"
-              ><input type="checkbox" checked disabled /><span
-                ><app-icon name="sparkles" />Semantic analysis</span
-              ></label
-            >
-            <label class="policy-locked"
-              ><input type="checkbox" checked disabled /><span
-                ><app-icon name="test-tube-2" />Test evidence</span
-              ></label
-            >
-            <label class="policy-locked"
-              ><input type="checkbox" checked disabled /><span
-                ><app-icon name="workflow" />CI/CD changes</span
-              ></label
-            >
-            <small
-              >Eligibility is controlled by language and framework capabilities to preserve review
-              safety.</small
-            >
-          </div>
-          <div class="review-actions">
-            <button
-              class="button primary wide"
-              type="button"
-              [disabled]="submitting()"
-              (click)="startReview(false)"
-            >
-              <app-icon name="play" />{{ submitting() ? 'Starting…' : 'Run dry review' }}
-            </button>
-            <button
-              class="button secondary wide"
-              type="button"
-              [disabled]="submitting()"
-              (click)="requestPublish()"
-            >
-              <app-icon name="rocket" />Publish review
-            </button>
-            <p><app-icon name="shield-check" />Dry run never writes comments to the provider.</p>
-          </div>
+          <fieldset class="review-includes" title="Review coverage is enforced by the server. Optional coverage switches are not supported by the current API."><legend>Include in review <app-icon name="lock-keyhole" /></legend>
+            <label><input type="checkbox" checked disabled /><span><strong>Static analysis</strong><small>Code quality, security, best practices</small></span></label>
+            <label><input type="checkbox" checked disabled /><span><strong>Semantic AI review</strong><small>Logic, architecture, design</small></span></label>
+            <label><input type="checkbox" checked disabled /><span><strong>Tests and CI</strong><small>Test coverage, build configuration</small></span></label>
+          </fieldset>
+          <div class="review-actions"><p><app-icon name="circle-alert" />Publishing writes comments to {{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }}</p></div>
         </section>
-
-        <section class="card context-card">
-          <div class="card-heading">
-            <div>
-              <h2>Repository Context</h2>
-              <p>Resolved for this pull request.</p>
-            </div>
-          </div>
-          <dl>
-            <div>
-              <dt>Provider</dt>
-              <dd>{{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }}</dd>
-            </div>
-            <div>
-              <dt>Repository</dt>
-              <dd>{{ repository().split('/').at(-1) }}</dd>
-            </div>
-            <div>
-              <dt>Base branch</dt>
-              <dd>{{ pr.base_branch }}</dd>
-            </div>
-            <div>
-              <dt>Head branch</dt>
-              <dd>{{ pr.head_branch }}</dd>
-            </div>
-            <div>
-              <dt>Head commit</dt>
-              <dd>{{ pr.head_commit.slice(0, 7) }}</dd>
-            </div>
-          </dl>
-        </section>
+        <section class="card context-card"><h2>Repository Context</h2><dl>
+          <div><dt><app-provider-mark [provider]="provider()" />Provider</dt><dd>{{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }}</dd></div>
+          <div><dt><app-icon name="database" />Repository</dt><dd>{{ repositoryName() }}</dd></div>
+          <div><dt><app-icon name="git-branch" />Base branch</dt><dd>{{ pr.base_branch }}</dd></div>
+          <div><dt><app-icon name="git-branch" />Head branch</dt><dd [attr.title]="pr.head_branch">{{ pr.head_branch }}</dd></div>
+          <div><dt><app-icon name="code-2" />Head commit</dt><dd>{{ pr.head_commit.slice(0, 7) }} <button type="button" aria-label="Copy head commit" (click)="copyCommit()"><app-icon name="copy" /></button></dd></div>
+        </dl></section><span role="status" class="copy-status">{{ copyStatus() }}</span>
       </aside>
     </div>
-  } @else {
-    <nav class="breadcrumb" aria-label="Breadcrumb">
-      <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span>Unavailable</span>
-    </nav>
-    <div class="inline-alert error-alert" role="alert">
-      <app-icon name="circle-alert" /><span>{{
-        error() ?? 'The pull request could not be loaded.'
-      }}</span>
-    </div>
-    <section class="card route-state-card">
-      <span class="empty-illustration"><app-icon name="git-pull-request" /></span>
-      <h1>Pull request unavailable</h1>
-      <p>
-        Return to the dashboard, confirm the provider and repository, then select the pull request
-        again.
-      </p>
-      <a class="button primary" routerLink="/">Back to pull requests</a>
-    </section>
-  }
+  } @else { <div class="inline-alert error-alert" role="alert">{{ error() ?? 'The pull request could not be loaded.' }}</div><a class="button primary" routerLink="/">Back to pull requests</a> }
 </section>
-
-@if (publishConfirmationOpen()) {
-  @if (pullRequest(); as pr) {
-    <div class="modal-backdrop" role="presentation" (click)="publishConfirmationOpen.set(false)">
-      <section
-        class="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="publish-modal-title"
-        (click)="$event.stopPropagation()"
-      >
-        <button
-          class="icon-button modal-close"
-          type="button"
-          aria-label="Close"
-          (click)="publishConfirmationOpen.set(false)"
-        >
-          <app-icon name="x" />
-        </button>
-        <span class="modal-icon warning"><app-icon name="message-square-text" /></span>
-        <h2 id="publish-modal-title">Publish review comments?</h2>
-        <p>
-          The engine will write evidence-grounded inline comments and update the review summary for
-          PR #{{ pr.number }}.
-        </p>
-        <div class="publish-summary">
-          <span><app-icon name="shield-check" />Duplicate prevention enabled</span
-          ><span><app-icon name="lock-keyhole" />Credentials remain server-side</span>
-        </div>
-        <div class="modal-actions">
-          <button
-            class="button secondary"
-            type="button"
-            (click)="publishConfirmationOpen.set(false)"
-          >
-            Cancel</button
-          ><button class="button danger" type="button" (click)="startReview(true)">
-            <app-icon name="rocket" />Publish review
-          </button>
-        </div>
-      </section>
-    </div>
-  }
-}
+@if (publishConfirmationOpen()) { @if (pullRequest(); as pr) {
+  <section class="pr-publish-confirmation" role="dialog" aria-modal="false" aria-labelledby="publish-modal-title">
+    <button class="icon-button modal-close" type="button" aria-label="Close publish confirmation" (click)="publishConfirmationOpen.set(false)"><app-icon name="x" /></button>
+    <span class="publish-confirmation-icon"><app-icon name="external-link" /></span>
+    <div class="publish-confirmation-copy"><h2 id="publish-modal-title">Publish review?</h2><p>This will run a fresh review and post comments to {{ provider() === 'github' ? 'GitHub' : 'Azure DevOps' }} for PR #{{ pr.number }}. Duplicate prevention remains enabled.</p></div>
+    <div class="modal-actions"><button class="button secondary" type="button" (click)="publishConfirmationOpen.set(false)">Cancel</button><button class="button danger" type="button" [disabled]="submitting()" (click)="startReview(true)"><app-icon name="rocket" />Publish</button></div>
+  </section>
+} }

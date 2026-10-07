@@ -1,8 +1,9 @@
 <section class="page settings-page">
-  <header class="page-heading sticky-page-heading">
+  <header class="page-heading heading-with-action sticky-page-heading"><div>
     <h1>Settings</h1>
     <p>Configure providers, review defaults, and runtime behavior</p>
-  </header>
+  </div><div class="heading-actions">    <button class="button secondary" type="button" (click)="discard()">Discard changes</button
+    ><button class="button primary" type="button" (click)="save()">Save settings</button></div></header>
 
   @if (saved()) {
     <div class="toast-message success">
@@ -19,28 +20,28 @@
     <button
       type="button"
       [class.active]="activeTab() === 'integrations'"
-      (click)="activeTab.set('integrations')"
+      (click)="selectTab('integrations')"
     >
       Integrations
     </button>
     <button
       type="button"
       [class.active]="activeTab() === 'review'"
-      (click)="activeTab.set('review')"
+      (click)="selectTab('review')"
     >
       Review Defaults
     </button>
     <button
       type="button"
       [class.active]="activeTab() === 'performance'"
-      (click)="activeTab.set('performance')"
+      (click)="selectTab('performance')"
     >
       Performance
     </button>
     <button
       type="button"
       [class.active]="activeTab() === 'publishing'"
-      (click)="activeTab.set('publishing')"
+      (click)="selectTab('publishing')"
     >
       Publishing
     </button>
@@ -48,7 +49,7 @@
 
   <div class="settings-dashboard">
     <div class="settings-column">
-      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'integrations'">
+      <section id="settings-integrations" class="card settings-panel" [class.focus-panel]="activeTab() === 'integrations'">
         <div class="section-heading">
           <div>
             <h2>Source control providers</h2>
@@ -154,7 +155,7 @@
         </div>
         <article class="ai-provider-card">
           <header>
-            <span class="integration-logo"><app-icon name="bot" /></span>
+            <span class="integration-logo"><app-provider-mark provider="ollama" /></span>
             <div>
               <h3>Ollama</h3>
               <p>Local AI provider</p>
@@ -201,7 +202,7 @@
     </div>
 
     <div class="settings-column">
-      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'review'">
+      <section id="settings-review" class="card settings-panel" [class.focus-panel]="activeTab() === 'review'">
         <div class="section-heading">
           <div>
             <h2>Review defaults</h2>
@@ -213,36 +214,37 @@
             <legend>Review depth</legend>
             <div>
               @for (option of depthOptions; track option.value) {
-                <label [class.selected]="preferences.defaultDepth() === option.value"
+                <label [class.selected]="draftDepth() === option.value"
                   ><input
                     type="radio"
                     name="defaultDepth"
                     [value]="option.value"
-                    [checked]="preferences.defaultDepth() === option.value"
+                    [checked]="draftDepth() === option.value"
                     (change)="setDefaultDepth(option.value)"
                   /><span>{{ option.label }}</span></label
                 >
               }
             </div>
           </fieldset>
+          <small class="preference-note">Local preference, editable.</small>
           <label class="inline-toggle policy-setting"
             ><span
               ><strong>Static analysis</strong
               ><small>Code quality, security, and best practices</small></span
-            ><input type="checkbox" checked disabled /><i></i
-          ></label>
+            ><input type="checkbox" checked disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
           <label class="inline-toggle policy-setting"
             ><span
               ><strong>Semantic AI review</strong
               ><small>Used only where semantic analysis adds value</small></span
-            ><input type="checkbox" checked disabled /><i></i
-          ></label>
+            ><input type="checkbox" checked disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
           <label class="inline-toggle policy-setting"
             ><span
               ><strong>Tests and CI</strong
               ><small>Test evidence and workflow changes remain reviewable</small></span
-            ><input type="checkbox" checked disabled /><i></i
-          ></label>
+            ><input type="checkbox" checked disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
           <div class="field">
             <span>Default mode</span>
             <div class="readonly-control"><span>Dry run</span><app-icon name="lock-keyhole" /></div>
@@ -251,7 +253,7 @@
         </div>
       </section>
 
-      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'publishing'">
+      <section id="settings-publishing" class="card settings-panel" [class.focus-panel]="activeTab() === 'publishing'">
         <div class="section-heading">
           <div>
             <h2>Publishing controls</h2>
@@ -276,8 +278,8 @@
             ><input
               type="checkbox"
               [checked]="health()?.review_policy?.confirmation_before_publish ?? false"
-              disabled /><i></i
-          ></label>
+              disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
           <label class="inline-toggle policy-setting"
             ><span
               ><strong>Duplicate prevention</strong
@@ -285,8 +287,8 @@
             ><input
               type="checkbox"
               [checked]="health()?.review_policy?.duplicate_prevention ?? false"
-              disabled /><i></i
-          ></label>
+              disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
           <label class="inline-toggle policy-setting"
             ><span
               ><strong>Summary comment</strong
@@ -294,12 +296,12 @@
             ><input
               type="checkbox"
               [checked]="health()?.review_policy?.summary_comment ?? false"
-              disabled /><i></i
-          ></label>
+              disabled /><i></i><small class="managed-label"><app-icon name="lock-keyhole" />Server-managed</small>
+          </label>
         </div>
       </section>
 
-      <section class="card settings-panel" [class.focus-panel]="activeTab() === 'performance'">
+      <section id="settings-performance" class="card settings-panel" [class.focus-panel]="activeTab() === 'performance'">
         <div class="section-heading">
           <div>
             <h2>Performance</h2>
@@ -315,8 +317,8 @@
               type="number"
               min="1"
               max="8"
-              [ngModel]="preferences.maxWorkers()"
-              (ngModelChange)="preferences.maxWorkers.set(+$event)"
+              [ngModel]="draftWorkers()"
+              (ngModelChange)="draftWorkers.set(+$event)"
           /></label>
           <div class="runtime-summary">
             <strong>Runtime health</strong>
@@ -331,8 +333,7 @@
     </div>
   </div>
 
-  <div class="settings-actions">
-    <button class="button secondary" type="button">Discard changes</button
-    ><button class="button primary" type="button" (click)="save()">Save settings</button>
+  <div class="settings-actions"><small>Local preferences: review depth and parallel workers. Provider credentials and policies are configured on the server.</small>
+
   </div>
 </section>

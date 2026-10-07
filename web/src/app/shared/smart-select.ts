@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  DestroyRef,
   HostListener,
   computed,
   inject,
@@ -56,7 +57,9 @@ let smartSelectSequence = 0;
     </button>
 
     @if (open()) {
-      <section class="smart-select-panel" [class.has-error]="!!error()">
+      <section class="smart-select-panel" popover="manual" [class.has-error]="!!error()"
+        [style.left.px]="panelLeft()" [style.top.px]="panelTop()" [style.bottom.px]="panelBottom()"
+        [style.width.px]="panelWidth()" [style.max-height.px]="panelMaxHeight()">
         @if (searchable()) {
           <label class="smart-select-search">
             <app-icon name="search" />
@@ -138,6 +141,45 @@ let smartSelectSequence = 0;
 export class SmartSelect {
   private readonly element: ElementRef<HTMLElement> = inject(ElementRef);
 
+  readonly panelLeft = signal(0);
+  readonly panelTop = signal<number | null>(0);
+  readonly panelBottom = signal<number | null>(null);
+  readonly panelWidth = signal(250);
+  readonly panelMaxHeight = signal(350);
+  private readonly destroyRef = inject(DestroyRef);
+  private openingTimer?: ReturnType<typeof setTimeout>;
+
+  constructor() {
+    const reposition = () => { if (this.open()) this.positionPanel(); };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    this.destroyRef.onDestroy(() => {
+      clearTimeout(this.openingTimer);
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    });
+  }
+
+  private panel(): HTMLElement | null {
+    return this.element.nativeElement.querySelector<HTMLElement>('.smart-select-panel');
+  }
+
+  positionPanel(): void {
+    const trigger = this.element.nativeElement.querySelector('.smart-select-trigger');
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const margin = 8, gap = 7;
+    const width = Math.min(Math.max(rect.width, 250), window.innerWidth - margin * 2);
+    const below = Math.max(0, window.innerHeight - rect.bottom - gap - margin);
+    const above = Math.max(0, rect.top - gap - margin);
+    const upward = below < 200 && above > below;
+    this.panelLeft.set(Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)));
+    this.panelWidth.set(width);
+    this.panelTop.set(upward ? null : Math.max(margin, rect.bottom + gap));
+    this.panelBottom.set(upward ? window.innerHeight - rect.top + gap : null);
+    this.panelMaxHeight.set(Math.min(350, upward ? above : below));
+  }
+
   readonly options = input<readonly SmartSelectOption[]>([]);
   readonly value = input('');
   readonly placeholder = input('Select an option');
@@ -206,14 +248,21 @@ export class SmartSelect {
         this.options().findIndex((option) => option.value === this.value()),
       ),
     );
-    if (this.searchable()) {
-      setTimeout(() =>
-        this.element.nativeElement.querySelector<HTMLInputElement>('input')?.focus(),
-      );
-    }
+    this.positionPanel();
+    clearTimeout(this.openingTimer);
+    this.openingTimer = setTimeout(() => {
+      if (!this.open()) return;
+      const panel = this.panel();
+      if (panel && typeof panel.showPopover === 'function') panel.showPopover();
+      this.positionPanel();
+      if (this.searchable()) panel?.querySelector<HTMLInputElement>('input')?.focus();
+    });
   }
 
   close(): void {
+    clearTimeout(this.openingTimer);
+    const panel = this.panel();
+    if (panel?.matches(':popover-open')) panel.hidePopover();
     this.open.set(false);
     this.query.set('');
   }
@@ -261,6 +310,13 @@ export class SmartSelect {
 
   optionId(index: number): string {
     return `${this.listboxId}-option-${index}`;
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (!this.open()) return;
+    this.close();
+    this.element.nativeElement.querySelector<HTMLButtonElement>('.smart-select-trigger')?.focus();
   }
 
   @HostListener('document:click', ['$event'])

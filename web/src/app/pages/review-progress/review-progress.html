@@ -16,7 +16,7 @@
       </div>
       <div class="heading-actions">
         <a class="button primary" routerLink="/">Run in background <app-icon name="external-link" /></a>
-        <button class="button ghost-danger" type="button" [disabled]="cancelling() || currentJob.status !== 'queued'" (click)="cancel()">{{ cancelling() ? 'Cancelling…' : 'Cancel review' }}</button>
+        <button class="button ghost-danger" type="button" [disabled]="cancelling() || currentJob.status !== 'queued'" [attr.title]="currentJob.status === 'running' ? 'The current engine supports cancelling queued reviews only.' : null" (click)="cancel()">{{ cancelling() ? 'Cancelling…' : 'Cancel review' }}</button>
       </div>
     </header>
 
@@ -45,12 +45,12 @@
       <article class="progress-metric"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ changedFileCount() }}</strong><small>Changed files</small></div></article>
       <article class="progress-metric teal"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ reviewFileCount() }}</strong><small>Review files</small></div></article>
       <article class="progress-metric warning"><span class="metric-icon"><app-icon name="triangle-alert" /></span><div><strong>{{ staticFindingCount() }}</strong><small>Static findings</small></div></article>
-      <article class="progress-metric violet"><span class="metric-icon"><app-icon name="bot" /></span><div><strong>{{ llmCallCount() }}</strong><small>LLM calls · actual / planned</small></div></article>
+      <article class="progress-metric violet"><span class="metric-icon"><app-icon name="cpu" /></span><div><strong>{{ llmCallCount() }}</strong><small>LLM calls · actual / planned</small></div></article>
     </div>
 
     <div class="progress-detail-grid">
       <section class="card activity-panel">
-        <div class="card-heading"><div><h2>Current activity</h2><p>Processing files and running evidence-grounded review</p></div></div>
+        <div class="card-heading"><div><h2>Current activity</h2><p>Processing files and running AI review</p></div></div>
         <ol class="activity-list">
           @for (step of activitySteps(); track step.key) {
             <li [class]="step.state">
@@ -77,6 +77,9 @@
                   <em>{{ activityTime(step) }}</em>
                 </div>
                 <small>{{ activityMessage(step) }}</small>
+                @if (step.state === 'active') {
+                  <div class="activity-progress-bar" role="progressbar" aria-label="Current activity batch progress" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="activityHasProgress(step) ? activityProgress(step) : null" [attr.aria-valuetext]="activityHasProgress(step) ? activityProgress(step) + '% of batches completed' : 'In progress; percentage unavailable'" [class.indeterminate]="!activityHasProgress(step)"><span [style.width.%]="activityHasProgress(step) ? activityProgress(step) : 35"></span></div>
+                }
                 @if (activityFiles(step).length) {
                   <ul class="activity-files" aria-label="Files in the current review batch">
                     @for (file of activityFiles(step); track file) {

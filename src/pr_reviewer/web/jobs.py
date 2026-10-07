@@ -444,6 +444,13 @@ class ReviewJobManager:
             "author": pull_request.get("author"),
             "decision": quality_gate.get("decision"),
             "findings": severity_total or len(findings),
+            "severity_counts": {
+                "critical": int(quality_gate.get("critical_count") or 0),
+                "high": int(quality_gate.get("high_count") or 0),
+                "medium": int(quality_gate.get("medium_count") or 0),
+                "low": int(quality_gate.get("low_count") or 0),
+                "suggestion": int(quality_gate.get("suggestion_count") or 0),
+            },
             "duration_seconds": diagnostics.get("total_review_seconds"),
             "dry_run": bool(result.get("dry_run", True)),
         }

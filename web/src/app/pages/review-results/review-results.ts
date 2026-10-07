@@ -65,6 +65,13 @@ export class ReviewResultsPage {
       return match ? { number: Number(match[1]), text: match[2] } : { number: index === 0 ? finding.line_number : null, text };
     });
   }
+  async copyJobId(): Promise<void> {
+    const id = this.job()?.id;
+    if (!id) return;
+    try { await navigator.clipboard.writeText(id); this.copyStatus.set('Job ID copied'); }
+    catch { this.copyStatus.set('Unable to copy job ID: ' + id); }
+  }
+
   async copyEvidence(finding: ReviewFinding): Promise<void> {
     try { await navigator.clipboard.writeText(finding.evidence ?? ''); this.copyStatus.set('Evidence copied'); }
     catch { this.copyStatus.set('Unable to copy. Select the evidence text to copy it.'); }

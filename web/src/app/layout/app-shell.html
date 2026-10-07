@@ -1,12 +1,16 @@
 <div
   class="app-frame"
+  [class.dashboard-route]="currentPath() === '/'"
+  [class.history-route]="currentPath() === '/history'"
+  [class.pr-detail-route]="currentPath().startsWith('/pull-requests/')"
   [class.sidebar-collapsed]="sidebarCollapsed()"
   [class.mobile-nav-open]="mobileNavigationOpen()"
   [class.page-scrolled]="pageScrolled()"
 >
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
     <a class="brand" routerLink="/" aria-label="Intelligent PR Reviewer dashboard">
-      <span class="brand-mark"><app-icon name="git-pull-request" /></span>
+      <span class="brand-mark"><app-icon name="git-branch" /></span>
       <span class="brand-copy">
         <strong>Intelligent PR Reviewer</strong>
         <small>Evidence-grounded code review</small>
@@ -17,6 +21,8 @@
       <div class="topbar-health" aria-label="Integration health">
         <span
           class="health-chip"
+          [class.is-connected]="providerState('github') === 'connected' && providerConnected('github') === true"
+          [class.is-checking]="providerState('github') === 'checking'"
           [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
           [class.is-muted]="providerState('github') === 'not-configured'"
           [class.is-warning]="providerState('github') === 'configured'"
@@ -27,6 +33,8 @@
         </span>
         <span
           class="health-chip"
+          [class.is-connected]="providerState('azure-devops') === 'connected' && providerConnected('azure-devops') === true"
+          [class.is-checking]="providerState('azure-devops') === 'checking'"
           [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
           [class.is-muted]="providerState('azure-devops') === 'not-configured'"
           [class.is-warning]="providerState('azure-devops') === 'configured'"
@@ -35,8 +43,8 @@
           <app-provider-mark provider="azure-devops" /><span class="status-dot"></span>Azure
           <span class="health-state">{{ healthState('azure-devops') }}</span>
         </span>
-        <span class="health-chip" [class.is-offline]="health()?.ollama?.ready === false">
-          <app-icon name="bot" /><span class="status-dot"></span>Ollama
+        <span class="health-chip" [class.is-connected]="health()?.ollama?.ready === true" [class.is-checking]="!health() || health()?.ollama?.ready === null" [class.is-offline]="health()?.ollama?.ready === false">
+          <app-provider-mark provider="ollama" /><span class="status-dot"></span>Ollama
           <span class="health-state">{{ healthState('ollama') }}</span>
         </span>
       </div>
@@ -68,7 +76,7 @@
               <em>{{ healthState('azure-devops') }}</em></span
             >
             <span [class.is-offline]="health()?.ollama?.ready === false"
-              ><app-icon name="bot" />Ollama <em>{{ healthState('ollama') }}</em></span
+              ><app-provider-mark provider="ollama" />Ollama <em>{{ healthState('ollama') }}</em></span
             >
           </div>
         }
@@ -81,7 +89,7 @@
       >
         <app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" />
       </button>
-      <button class="profile-button" type="button" aria-label="Open user menu">
+      <div class="profile-wrapper"><button class="profile-button" type="button" aria-label="Open user menu" [attr.aria-expanded]="profileOpen()" (click)="profileOpen.set(!profileOpen())">
         <span class="avatar">IR</span>
         <span class="profile-copy"
           ><strong>Review engine</strong
@@ -89,10 +97,14 @@
         >
         <app-icon name="chevron-down" />
       </button>
+      @if (profileOpen()) { <div class="profile-popover"><strong>Review engine</strong><small>{{ health()?.version ? 'Version ' + health()?.version : 'Version unavailable' }}</small><a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a><a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a></div> }
+      </div>
       <button
         class="icon-button mobile-menu-button"
         type="button"
         aria-label="Open navigation"
+        [attr.aria-expanded]="mobileNavigationOpen()"
+        aria-controls="primary-navigation"
         (click)="toggleMobileNavigation()"
       >
         <app-icon name="menu" />
@@ -100,7 +112,7 @@
     </div>
   </header>
 
-  <aside class="sidebar" aria-label="Primary navigation">
+  <aside id="primary-navigation" class="sidebar" aria-label="Primary navigation">
     <nav>
       @for (item of navigation; track item.route) {
         <a
@@ -125,7 +137,7 @@
     (click)="closeMobileNavigation()"
   ></button>
 
-  <main class="main-content">
+  <main id="main-content" class="main-content" appRevealSections>
     <router-outlet />
   </main>
 </div>

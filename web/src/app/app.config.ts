@@ -7,6 +7,8 @@ import { provideHttpClient, withFetch } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
 
 import {
+  LucideAtom,
+  LucideFlaskConical,
   LucideBan,
   LucideChevronUp,
   LucideCircleArrowUp,
@@ -45,6 +47,7 @@ import {
   LucideGitBranch,
   LucideGitPullRequest,
   LucideHistory,
+  LucideHouse,
   LucideLayoutDashboard,
   LucideListFilter,
   LucideLoaderCircle,
@@ -87,7 +90,9 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes),
     provideLucideConfig({ size: 18, strokeWidth: 1.8 }),
     provideLucideIcons(
-                              LucideBan,
+      LucideAtom,
+      LucideFlaskConical,
+      LucideBan,
       LucideChevronUp,
       LucideCircleArrowUp,
       LucideInfo,
@@ -125,6 +130,7 @@ export const appConfig: ApplicationConfig = {
       LucideGitBranch,
       LucideGitPullRequest,
       LucideHistory,
+      LucideHouse,
       LucideLayoutDashboard,
       LucideListFilter,
       LucideLoaderCircle,

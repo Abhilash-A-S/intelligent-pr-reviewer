@@ -1,16 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
 import { ProviderId, PullRequestSummary } from '../../core/models';
 import { WorkspaceService } from '../../core/workspace.service';
+import { Pagination } from '../../shared/pagination';
 import { Icon } from '../../shared/icon';
 import { ProviderMark } from '../../shared/provider-mark';
 import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 
 @Component({
   selector: 'app-dashboard-page',
-  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect],
+  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect, Pagination],
   templateUrl: './dashboard.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -75,6 +76,13 @@ export class DashboardPage {
       return matchesStatus && matchesSearch;
     });
   });
+
+  readonly pageSize = 4;
+  readonly requestedPage = linkedSignal({ source: this.filteredPullRequests, computation: () => 1 });
+  readonly currentPage = computed(() => Math.min(this.requestedPage(), Math.max(1, Math.ceil(this.filteredPullRequests().length / this.pageSize))));
+  readonly pagedPullRequests = computed(() => this.filteredPullRequests().slice((this.currentPage() - 1) * this.pageSize, this.currentPage() * this.pageSize));
+  readonly firstItem = computed(() => this.filteredPullRequests().length ? (this.currentPage() - 1) * this.pageSize + 1 : 0);
+  readonly lastItem = computed(() => Math.min(this.currentPage() * this.pageSize, this.filteredPullRequests().length));
 
   readonly metrics = computed(() => {
     const pullRequests = this.workspace.pullRequests();

@@ -4,9 +4,16 @@
       <h1>Review History</h1>
       <p>Previous pull request reviews across providers</p>
     </div>
-    <button class="button secondary" type="button" [disabled]="loading()" (click)="load()">
+    <div class="heading-actions"><button class="button secondary" type="button" [disabled]="loading()" (click)="load()">
       <app-icon name="refresh-cw" />{{ loading() ? 'Loading…' : 'Refresh' }}
-    </button>
+    </button>    <button
+      class="button primary"
+      type="button"
+      [disabled]="!filteredRows().length"
+      (click)="exportHistory()"
+    >
+      <app-icon name="download" />Export
+    </button></div>
   </header>
 
   @if (error()) {
@@ -60,21 +67,12 @@
       ariaLabel="Filter by provider"
       (valueChange)="setProviderFilter($event)"
     />
-    <app-smart-select
-      [options]="decisionOptions"
-      [value]="decision()"
-      ariaLabel="Filter by decision"
-      (valueChange)="setDecisionFilter($event)"
-    />
-    <span class="date-range"><app-icon name="calendar" />{{ historyRangeLabel() }}</span>
-    <button
-      class="button primary export-history"
-      type="button"
-      [disabled]="!filteredRows().length"
-      (click)="exportHistory()"
-    >
-      <app-icon name="download" />Export
-    </button>
+    <app-smart-select [options]="repositoryOptions()" [value]="repository()" ariaLabel="Filter by repository" (valueChange)="repository.set($event)" />
+    <app-smart-select [options]="decisionOptions" [value]="decision()" ariaLabel="Filter by decision" (valueChange)="setDecisionFilter($event)" />
+    <details class="history-date-picker"><summary><app-icon name="calendar" />{{ historyRangeLabel() }}<app-icon name="chevron-down" /></summary>
+      <div class="date-range-panel"><label>From<input type="date" [ngModel]="startDate()" (ngModelChange)="startDate.set($event)" /></label><label>To<input type="date" [ngModel]="endDate()" (ngModelChange)="endDate.set($event)" /></label><button class="button secondary" type="button" (click)="startDate.set(''); endDate.set('')">Clear dates</button>@if (dateError()) {<span role="alert">{{ dateError() }}</span>}</div>
+    </details>
+
   </section>
 
   <section class="card data-card history-data-card">
@@ -95,7 +93,7 @@
           </tr>
         </thead>
         <tbody>
-          @for (row of filteredRows(); track row.id) {
+          @for (row of pagedRows(); track row.id) {
             <tr>
               <td>
                 <span class="history-review"
@@ -128,11 +126,13 @@
                 >
               </td>
               <td>
-                <strong>{{ row.findings }}</strong>
+                @if (row.severity; as counts) {
+                  <span class="severity-counts" [attr.aria-label]="counts.danger + ' critical/high, ' + counts.warning + ' medium, ' + counts.info + ' low/suggestions'"><span title="Critical / High"><i class="danger"></i>{{ counts.danger }}</span><span title="Medium"><i class="warning"></i>{{ counts.warning }}</span><span title="Low / Suggestions"><i class="info"></i>{{ counts.info }}</span></span>
+                } @else { <span [attr.title]="'Total findings; severity breakdown unavailable'">{{ row.findings }}</span> }
               </td>
               <td>{{ row.duration }}</td>
               <td>
-                <span class="mode-pill">{{ row.mode }}</span>
+                <span class="mode-pill" [class.published]="row.mode === 'Published'">{{ row.mode }}</span>
               </td>
               <td>{{ row.created }}</td>
               <td>
@@ -172,26 +172,21 @@
         </tbody>
       </table>
     </div>
-    <footer class="table-footer">
-      <span>Showing {{ filteredRows().length }} of {{ metrics().total }} reviews</span>
-      @if (rows().length) {
-        <span class="live-data-label">Current API session</span>
-      }
-    </footer>
+    <footer class="table-footer"><span>Showing {{ firstItem() }}–{{ lastItem() }} of {{ filteredRows().length }} reviews</span><app-pagination [total]="filteredRows().length" [page]="currentPage()" [pageSize]="pageSize" (pageChange)="requestedPage.set($event)" /></footer>
   </section>
 
   <section class="card history-chart-card">
     <div class="card-heading">
       <div>
         <h2>Review quality trend</h2>
-        <p>Completed review decisions over the last 31 days</p>
+        <p>Number of reviews by date and decision</p>
       </div>
       <div class="chart-legend">
-        <span><i class="reviews"></i>Passed</span><span><i class="blocked"></i>Blocked</span>
+        <span><i class="passed"></i>Passed</span><span><i class="blocked"></i>Blocked</span>
       </div>
     </div>
     @if (rows().length) {
-      <div class="bar-chart" aria-label="Review quality trend chart">
+      <div class="trend-plot"><div class="trend-axis"><span>{{ trendMaximum() }}</span><span>{{ trendMaximum()/2 }}</span><span>0</span></div><div class="bar-chart" role="img" aria-label="Passed and blocked reviews by date">
         @for (bar of trend(); track bar.date.getTime()) {
           <span
             class="bar-pair"
@@ -208,7 +203,7 @@
           ></span>
         }
       </div>
-      <div class="bar-chart-labels">
+      </div><div class="bar-chart-labels">
         @for (label of trendLabels(); track label) {
           <span>{{ label }}</span>
         }

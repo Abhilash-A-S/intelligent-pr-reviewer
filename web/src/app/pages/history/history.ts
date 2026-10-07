@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
 import { ReviewerApi } from '../../core/api.service';
 import { ReviewJob } from '../../core/models';
+import { Pagination } from '../../shared/pagination';
 import { Icon } from '../../shared/icon';
 import { ProviderMark } from '../../shared/provider-mark';
 import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
@@ -12,12 +13,14 @@ interface HistoryRow {
   id: string;
   provider: 'github' | 'azure-devops';
   repository: string;
+  repositoryKey: string;
+  severity: { danger: number; warning: number; info: number } | null;
   pullNumber: number;
   title: string;
   author: string;
   decision: 'blocked' | 'changes' | 'passed' | 'running' | 'failed';
   findings: number;
-  mode: 'Dry run' | 'Published';
+  mode: 'Dry run' | 'Published' | 'Publishing' | 'Not published';
   duration: string;
   created: string;
   createdAt: Date;
@@ -25,7 +28,7 @@ interface HistoryRow {
 
 @Component({
   selector: 'app-history-page',
-  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect],
+  imports: [FormsModule, RouterLink, Icon, ProviderMark, SmartSelect, Pagination],
   templateUrl: './history.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -37,6 +40,14 @@ export class HistoryPage {
   readonly search = signal('');
   readonly provider = signal<'all' | 'github' | 'azure-devops'>('all');
   readonly decision = signal<'all' | HistoryRow['decision']>('all');
+  readonly repository = signal('all');
+  readonly startDate = signal('');
+  readonly endDate = signal('');
+  readonly dateError = computed(() => this.startDate() && this.endDate() && this.startDate() > this.endDate() ? 'Start date must be before the end date.' : '');
+  readonly repositoryOptions = computed<SmartSelectOption[]>(() => [
+    {value: 'all', label: 'All repositories'},
+    ...[...new Set(this.rows().filter(r => this.provider() === 'all' || r.provider === this.provider()).map(r => r.repositoryKey))].sort().map(value => ({value, label: value})),
+  ]);
   readonly providerOptions: SmartSelectOption[] = [
     { value: 'all', label: 'All providers' },
     { value: 'github', label: 'GitHub' },
@@ -75,48 +86,41 @@ export class HistoryPage {
       const decisionMatch = this.decision() === 'all' || row.decision === this.decision();
       const searchable =
         `${row.title} ${row.repository} ${row.author} ${row.pullNumber}`.toLowerCase();
-      return providerMatch && decisionMatch && (!search || searchable.includes(search));
+      const repositoryMatch = this.repository() === 'all' || row.repositoryKey === this.repository();
+      const day = this.localDate(row.createdAt);
+      const dateMatch = (!this.startDate() || day >= this.startDate()) && (!this.endDate() || day <= this.endDate());
+      return !this.dateError() && providerMatch && repositoryMatch && decisionMatch && dateMatch && (!search || searchable.includes(search));
     });
   });
 
+  readonly pageSize = 5;
+  readonly requestedPage = linkedSignal({source: this.filteredRows, computation: () => 1});
+  readonly currentPage = computed(() => Math.min(this.requestedPage(), Math.max(1, Math.ceil(this.filteredRows().length / this.pageSize))));
+  readonly pagedRows = computed(() => this.filteredRows().slice((this.currentPage()-1)*this.pageSize, this.currentPage()*this.pageSize));
+  readonly firstItem = computed(() => this.filteredRows().length ? (this.currentPage()-1)*this.pageSize+1 : 0);
+  readonly lastItem = computed(() => Math.min(this.currentPage()*this.pageSize, this.filteredRows().length));
   readonly trend = computed(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const days = Array.from({ length: 31 }, (_value, index) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() - (30 - index));
-      const matching = this.rows().filter((row) => this.sameDay(row.createdAt, date));
-      return {
-        date,
-        passed: matching.filter((row) => row.decision === 'passed').length,
-        blocked: matching.filter((row) => ['blocked', 'changes', 'failed'].includes(row.decision))
-          .length,
-      };
-    });
-    const maximum = Math.max(1, ...days.flatMap((day) => [day.passed, day.blocked]));
-    return days.map((day) => ({
-      ...day,
-      passedHeight: (day.passed / maximum) * 100,
-      blockedHeight: (day.blocked / maximum) * 100,
-    }));
+    const end = this.endDate() ? new Date(this.endDate() + 'T00:00:00') : new Date(); end.setHours(0,0,0,0);
+    const start = this.startDate() ? new Date(this.startDate() + 'T00:00:00') : new Date(end);
+    if (!this.startDate()) start.setDate(end.getDate()-30);
+    if (this.dateError()) return [];
+    // Limit chart buckets to 31; longer ranges aggregate into consecutive date intervals.
+    const totalDays = Math.round((Date.UTC(end.getFullYear(),end.getMonth(),end.getDate()) - Date.UTC(start.getFullYear(),start.getMonth(),start.getDate()))/86400000)+1;
+    const bucketDays = Math.max(1, Math.ceil(totalDays/31));
+    const bars = [];
+    for (let offset=0; offset<totalDays; offset+=bucketDays) {
+      const date = new Date(start); date.setDate(start.getDate()+offset);
+      const next = new Date(date); next.setDate(date.getDate()+bucketDays);
+      const matching = this.filteredRows().filter(r => r.createdAt >= date && r.createdAt < next);
+      bars.push({date, passed: matching.filter(r => r.decision === 'passed').length, blocked: matching.filter(r => ['blocked','changes'].includes(r.decision)).length});
+    }
+    const maximum = Math.max(1, ...bars.map(b => b.passed+b.blocked));
+    return bars.map(b => ({...b, passedHeight:b.passed/maximum*100, blockedHeight:b.blocked/maximum*100}));
   });
-
-  readonly historyRangeLabel = computed(() => {
-    const trend = this.trend();
-    if (!trend.length) return '—';
-    const format = new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-    return `${format.format(trend[0].date)} – ${format.format(trend.at(-1)!.date)}`;
-  });
-
-  readonly trendLabels = computed(() => {
-    const trend = this.trend();
-    const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-    return [0, 6, 12, 18, 24, 30].map((index) => format.format(trend[index].date));
-  });
+  readonly trendMaximum = computed(() => Math.max(1, ...this.trend().map(b=>b.passed+b.blocked)));
+  readonly trendLabels = computed(() => this.trend().filter((_b,i,all)=>i%Math.max(1,Math.floor(all.length/6))===0 || i===all.length-1).map(b=>b.date.toLocaleDateString([], {month:'short',day:'numeric'})));
+  readonly historyRangeLabel = computed(() => this.startDate() || this.endDate() ? `${this.startDate() || 'Any date'} – ${this.endDate() || 'Today'}` : 'All dates');
+  private localDate(date: Date): string { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
 
   constructor() {
     this.load();
@@ -141,6 +145,7 @@ export class HistoryPage {
   setProviderFilter(value: string): void {
     if (['all', 'github', 'azure-devops'].includes(value)) {
       this.provider.set(value as 'all' | 'github' | 'azure-devops');
+      this.repository.set('all');
     }
   }
 
@@ -152,9 +157,9 @@ export class HistoryPage {
 
   decisionLabel(decision: HistoryRow['decision']): string {
     return {
-      blocked: 'Block merge',
+      blocked: 'BLOCK',
       changes: 'Request changes',
-      passed: 'Passed',
+      passed: 'PASS',
       running: 'Running',
       failed: 'Failed',
     }[decision];
@@ -210,7 +215,9 @@ export class HistoryPage {
     return {
       id: job.id,
       provider: job.command.provider,
-      repository: job.command.repository.split('/').at(-1) ?? job.command.repository,
+      repository: job.command.repository.split('/').slice(-2).join('/'),
+      repositoryKey: job.command.repository,
+      severity: quality ? {danger: quality.critical_count + quality.high_count, warning: quality.medium_count, info: quality.low_count + quality.suggestion_count} : summary?.severity_counts ? {danger: (summary.severity_counts['critical'] ?? 0) + (summary.severity_counts['high'] ?? 0), warning: summary.severity_counts['medium'] ?? 0, info: (summary.severity_counts['low'] ?? 0) + (summary.severity_counts['suggestion'] ?? 0)} : null,
       pullNumber: job.command.pull_number,
       title:
         job.result?.pull_request.title ??
@@ -219,8 +226,8 @@ export class HistoryPage {
       author: job.result?.pull_request.author ?? summary?.author ?? 'Unavailable',
       decision,
       findings: total,
-      mode: job.command.publish ? 'Published' : 'Dry run',
-      duration: typeof duration === 'number' ? `${duration.toFixed(1)}s` : '—',
+      mode: (job.result?.dry_run ?? summary?.dry_run ?? !job.command.publish) ? 'Dry run' : job.status === 'completed' ? 'Published' : ['queued', 'running'].includes(job.status) ? 'Publishing' : 'Not published',
+      duration: typeof duration === 'number' ? `${String(Math.floor(duration/60)).padStart(2,'0')}:${String(Math.floor(duration%60)).padStart(2,'0')}` : '—',
       created: Number.isNaN(createdAt.getTime())
         ? '—'
         : createdAt.toLocaleString([], {

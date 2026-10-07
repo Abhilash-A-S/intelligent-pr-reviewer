@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, ViewEncapsulation, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 
@@ -17,9 +17,12 @@ import { ProviderMark } from '../../shared/provider-mark';
   selector: 'app-pull-request-page',
   imports: [RouterLink, Icon, ProviderMark],
   templateUrl: './pull-request.html',
+  styleUrl: './pull-request.scss',
+  encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullRequestPage {
+  readonly Math = Math;
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(ReviewerApi);
@@ -35,6 +38,28 @@ export class PullRequestPage {
   readonly depth = signal<ReviewDepth>(this.preferences.defaultDepth());
   readonly publishConfirmationOpen = signal(false);
   readonly submitting = signal(false);
+
+  readonly copyStatus = signal('');
+  readonly repositoryName = computed(() => this.repository().split('/').at(-1) ?? this.repository());
+  readonly projectCount = computed(() => new Set(this.files().map(file => this.fileProject(file))).size);
+  fileProject(file: ChangedFileSummary): string {
+    const path = file.file_path.replaceAll('\\', '/');
+    const match = path.match(/^(?:apps|packages|projects|services)\/([^/]+)\//);
+    return match?.[1] ?? this.repositoryName();
+  }
+  fileType(file: ChangedFileSummary): string {
+    if (/(^|\/)(tests?|__tests__)\/|\.(test|spec)\./i.test(file.file_path)) return 'test';
+    const ext = file.file_path.split('.').pop()?.toLowerCase();
+    if (ext === 'tsx' || ext === 'jsx') return 'react';
+    if (ext === 'ts') return 'ts';
+    if (ext === 'js' || ext === 'mjs' || ext === 'cjs') return 'js';
+    return 'file';
+  }
+  async copyCommit(): Promise<void> {
+    try { await navigator.clipboard.writeText(this.pullRequest()?.head_commit ?? ''); this.copyStatus.set('Commit copied'); }
+    catch { this.copyStatus.set('Unable to copy the commit.'); }
+  }
+  @HostListener('document:keydown.escape') closeConfirmation(): void { this.publishConfirmationOpen.set(false); }
 
   readonly additions = computed(() => this.sumKnownDiffValues('additions'));
   readonly deletions = computed(() => this.sumKnownDiffValues('deletions'));
@@ -130,9 +155,8 @@ export class PullRequestPage {
   }
 
   private sumKnownDiffValues(key: 'additions' | 'deletions'): number | null {
-    const values = this.files()
-      .map((file) => file[key])
-      .filter((value): value is number => typeof value === 'number');
-    return values.length ? values.reduce((total, value) => total + value, 0) : null;
+    const values = this.files().map((file) => file[key]);
+    if (values.some(value => typeof value !== 'number' || !Number.isFinite(value))) return null;
+    return values.reduce<number>((total, value) => total + (value ?? 0), 0);
   }
 }

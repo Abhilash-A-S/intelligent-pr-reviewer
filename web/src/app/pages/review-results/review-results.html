@@ -18,11 +18,11 @@
         ><app-icon name="chevron-right" /><span>Results</span>
       </nav>
 
-      <header class="page-heading results-heading">
+      <header class="page-heading results-heading heading-with-action sticky-page-heading">
         <div>
           <h1>Review results</h1>
           <p class="result-meta">
-            Job ID: {{ currentJob.id.toUpperCase() }} <i></i> Completed
+            <span class="compact-job-id" [attr.title]="currentJob.id">Job: {{ currentJob.id.slice(0, 8).toUpperCase() }}{{ currentJob.id.length > 8 ? '…' : '' }}</span><button class="metadata-copy" type="button" aria-label="Copy job ID" (click)="copyJobId()"><app-icon name="copy" /></button><i></i> Completed
             {{ completedLabel() }}
             <span class="result-decision" [class.pass]="decisionLabel() === 'PASS'" [class.warning]="decisionLabel() !== 'BLOCK' && decisionLabel() !== 'PASS'"
               ><app-icon [name]="decisionLabel() === 'BLOCK' ? 'ban' : 'shield-check'" />{{
@@ -31,6 +31,20 @@
             >
           </p>
         </div>
+        <div class="heading-actions"><a class="button secondary" [routerLink]="['/pull-requests', reviewResult.pull_request.number]" [queryParams]="{provider: reviewResult.pull_request.provider, repository: reviewResult.pull_request.repository}"><app-icon name="git-pull-request" />View PR</a>            @if (reviewResult.dry_run) {
+              <button
+                class="button primary"
+                type="button"
+                [disabled]="publishing()"
+                (click)="publishConfirmationOpen.set(true)"
+              >
+                <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish to PR' }}
+              </button>
+            }
+            <button class="button secondary" type="button" (click)="downloadJson()">
+              <app-icon name="file-text" />Export report
+            </button>
+</div>
       </header>
 
       @if (error()) {
@@ -169,19 +183,6 @@
               <li><app-icon name="git-branch" /><span><strong>{{ reviewResult.publishing.skipped_duplicates }}</strong> duplicates skipped</span></li>
               <li [class.has-failures]="reviewResult.publishing.failed_comments.length > 0"><app-icon name="triangle-alert" /><span><strong>{{ reviewResult.publishing.failed_comments.length }}</strong> failures</span></li>
             </ul>
-            @if (reviewResult.dry_run) {
-              <button
-                class="button primary wide"
-                type="button"
-                [disabled]="publishing()"
-                (click)="publishConfirmationOpen.set(true)"
-              >
-                <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish to PR' }}
-              </button>
-            }
-            <button class="button secondary wide" type="button" (click)="downloadJson()">
-              <app-icon name="file-text" />Export report
-            </button>
           </section>
 
           <section class="card rejected-card">

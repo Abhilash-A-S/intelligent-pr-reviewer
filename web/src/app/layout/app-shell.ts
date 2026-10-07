@@ -15,10 +15,11 @@ import { HealthResponse, ProviderStatus } from '../core/models';
 import { ThemeService } from '../core/theme.service';
 import { Icon } from '../shared/icon';
 import { ProviderMark } from '../shared/provider-mark';
+import { RevealSections } from '../shared/reveal-sections';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, Icon, ProviderMark],
+  imports: [RouterOutlet, RouterLink, Icon, ProviderMark, RevealSections],
   templateUrl: './app-shell.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -30,6 +31,7 @@ export class AppShell {
   readonly sidebarCollapsed = signal(false);
   readonly mobileNavigationOpen = signal(false);
   readonly mobileHealthOpen = signal(false);
+  readonly profileOpen = signal(false);
   readonly health = signal<HealthResponse | null>(null);
   readonly currentPath = signal(this.router.url.split('?')[0]);
   readonly pageScrolled = signal(false);
@@ -49,6 +51,10 @@ export class AppShell {
       .subscribe((event) => {
         this.currentPath.set(event.urlAfterRedirects.split('?')[0]);
         this.closeMobileNavigation();
+        this.mobileHealthOpen.set(false);
+        this.profileOpen.set(false);
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        this.pageScrolled.set(false);
       });
     this.api.health(true).subscribe({
       next: (health) => this.health.set(health),
@@ -104,15 +110,22 @@ export class AppShell {
   isNavigationActive(section: string): boolean {
     const path = this.currentPath();
     if (section === 'dashboard') {
-      return path === '/' || path.startsWith('/pull-requests/') || path.startsWith('/reviews/');
+      return path === '/';
     }
-    if (section === 'history') return path === '/history' || path.startsWith('/history/');
+    if (section === 'history') return path === '/history' || path.startsWith('/history/') || path.startsWith('/pull-requests/') || path.startsWith('/reviews/');
     return path === '/settings' || path.startsWith('/settings/');
   }
 
   @HostListener('window:scroll')
   onWindowScroll(): void {
     this.pageScrolled.set(window.scrollY > 48);
+  }
+
+  @HostListener('document:keydown.escape')
+  closeOverlays(): void {
+    this.closeMobileNavigation();
+    this.mobileHealthOpen.set(false);
+    this.profileOpen.set(false);
   }
 
   toggleMobileHealth(): void {

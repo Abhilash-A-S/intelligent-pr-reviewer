@@ -50,7 +50,7 @@ describe('ReviewResultsPage', () => {
   it('does not open publishing until the explicit button is clicked', () => {
     const fixture = TestBed.createComponent(ReviewResultsPage); fixture.detectChanges();
     expect(fixture.componentInstance.publishConfirmationOpen()).toBeFalse();
-    (fixture.nativeElement.querySelector('.publishing-card .primary') as HTMLButtonElement).click();
+    (fixture.nativeElement.querySelector('.results-heading .heading-actions .primary') as HTMLButtonElement).click();
     fixture.detectChanges(); expect(fixture.nativeElement.querySelector('[role="dialog"]')).toBeTruthy();
   });
 });

@@ -208,8 +208,12 @@ def _diff_counts(patch: str | None) -> tuple[int | None, int | None]:
         return None, None
     additions = 0
     deletions = 0
+    in_hunk = False
     for line in patch.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk:
             continue
         if line.startswith("+"):
             additions += 1
@@ -395,6 +399,9 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         adapter = _provider_or_http_error(provider)
         try:
             files = adapter.get_changed_files(repository, pull_number)
+            # Azure lists metadata first; line statistics require text patches.
+            if adapter.supports_deferred_patch_hydration is True and files:
+                files = adapter.hydrate_changed_files(repository, pull_number, files)
         except Exception as exc:
             raise _provider_failure(exc) from exc
         items = []

@@ -304,3 +304,37 @@ def test_embedded_angular_shell_supports_deep_links():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<app-root>" in response.text
+
+
+def test_azure_file_statistics_hydrate_metadata_before_counting(monkeypatch):
+    provider = Mock(supports_deferred_patch_hydration=True)
+    metadata = [ChangedFile(file_path="src/app.js", status="added")]
+    provider.get_changed_files.return_value = metadata
+    provider.hydrate_changed_files.return_value = [
+        ChangedFile(file_path="src/app.js", status="added",
+                    patch="--- /dev/null\n+++ b/src/app.js\n@@ -0,0 +1,2 @@\n+first\n+++second\n")
+    ]
+    monkeypatch.setattr(web_api, "create_pull_request_provider", lambda _name: provider)
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+    response = client.get("/api/pull-requests/1/files", params={
+        "provider": "azure-devops", "repository": "org/project/repo"})
+    assert response.status_code == 200
+    provider.hydrate_changed_files.assert_called_once_with("org/project/repo", 1, metadata)
+    assert response.json()["items"][0]["additions"] == 2
+    assert response.json()["items"][0]["deletions"] == 0
+
+
+def test_file_statistics_preserve_unknown_binary_and_zero_text_counts(monkeypatch):
+    provider = Mock(supports_deferred_patch_hydration=True)
+    provider.get_changed_files.return_value = [ChangedFile(file_path="image.png", status="added")]
+    provider.hydrate_changed_files.return_value = [
+        ChangedFile(file_path="image.png", status="added", patch=None),
+        ChangedFile(file_path="empty.txt", status="added", patch=""),
+        ChangedFile(file_path="removed.txt", status="removed", patch="--- a/removed.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-line\n---source\n"),
+    ]
+    monkeypatch.setattr(web_api, "create_pull_request_provider", lambda _name: provider)
+    client = TestClient(web_api.create_app(job_manager=StubJobManager()))
+    response = client.get("/api/pull-requests/1/files", params={
+        "provider": "azure-devops", "repository": "org/project/repo"})
+    items = response.json()["items"]
+    assert [(i["additions"], i["deletions"]) for i in items] == [(None, None), (0, 0), (0, 2)]

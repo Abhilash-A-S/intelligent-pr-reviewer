@@ -159,3 +159,10 @@ def test_job_manager_exposes_live_metrics_and_structured_events():
     assert batch["batch_index"] == 1
     assert batch["token_count"] == 640
     assert job["events"][-1]["id"] == "review-completed"
+
+
+def test_history_summary_preserves_severity_breakdown():
+    result = {"quality_gate": {"decision": "block", "critical_count": 1, "high_count": 2, "medium_count": 3, "low_count": 4, "suggestion_count": 5}, "findings": []}
+    summary = ReviewJobManager._summarize_result(result)
+    assert summary["findings"] == 15
+    assert summary["severity_counts"] == {"critical": 1, "high": 2, "medium": 3, "low": 4, "suggestion": 5}

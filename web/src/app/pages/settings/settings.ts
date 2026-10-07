@@ -19,14 +19,16 @@ export class SettingsPage {
   private readonly api = inject(ReviewerApi);
   readonly preferences = inject(ReviewPreferencesService);
   readonly activeTab = signal<SettingsTab>('integrations');
+  readonly draftDepth = signal<ReviewDepth>(this.preferences.defaultDepth());
+  readonly draftWorkers = signal(this.preferences.maxWorkers());
   readonly health = signal<HealthResponse | null>(null);
   readonly error = signal<string | null>(null);
   readonly checking = signal(false);
   readonly saved = signal(false);
   readonly depthOptions: ReadonlyArray<{ value: ReviewDepth; label: string; desc: string }> = [
-    { value: 'fast', label: 'Fast', desc: 'Minimum LLM calls' },
+    { value: 'fast', label: 'Quick', desc: 'Minimum LLM calls' },
     { value: 'standard', label: 'Standard', desc: 'Balanced and recommended' },
-    { value: 'deep', label: 'Deep', desc: 'Every eligible file' },
+    { value: 'deep', label: 'Thorough', desc: 'Every eligible file' },
   ];
 
   constructor() {
@@ -66,12 +68,32 @@ export class SettingsPage {
   }
 
   save(): void {
+    const workers = Number(this.draftWorkers());
+    if (!Number.isInteger(workers) || workers < 1 || workers > 8) {
+      this.error.set('Parallel workers must be a whole number between 1 and 8.');
+      return;
+    }
+    this.error.set(null);
+    this.preferences.defaultDepth.set(this.draftDepth());
+    this.preferences.maxWorkers.set(workers);
     this.preferences.save();
     this.saved.set(true);
     setTimeout(() => this.saved.set(false), 2200);
   }
 
+  discard(): void {
+    this.draftDepth.set(this.preferences.defaultDepth());
+    this.draftWorkers.set(this.preferences.maxWorkers());
+    this.saved.set(false);
+    this.error.set(null);
+  }
+
+  selectTab(tab: SettingsTab): void {
+    this.activeTab.set(tab);
+    document.getElementById('settings-' + tab)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+  }
+
   setDefaultDepth(value: ReviewDepth): void {
-    this.preferences.defaultDepth.set(value);
+    this.draftDepth.set(value);
   }
 }

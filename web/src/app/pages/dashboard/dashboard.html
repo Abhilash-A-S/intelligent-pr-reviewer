@@ -1,9 +1,18 @@
 <section class="page dashboard-page">
-  <header class="page-heading heading-with-action">
+  <header class="page-heading heading-with-action sticky-page-heading">
     <div>
       <h1>Pull Requests</h1>
       <p>Select a pull request to review</p>
     </div>
+    <div class="heading-actions">      <button
+        class="button primary"
+        type="button"
+        [disabled]="workspace.loading()"
+        (click)="workspace.refreshPullRequests()"
+      >
+        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
+        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
+      </button></div>
   </header>
 
   <section class="card repository-filter" aria-labelledby="repository-filter-title">
@@ -99,15 +108,7 @@
         />
       </div>
 
-      <button
-        class="button primary refresh-button"
-        type="button"
-        [disabled]="workspace.loading()"
-        (click)="workspace.refreshPullRequests()"
-      >
-        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
-        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
-      </button>
+
     </div>
 
     @if (workspace.discoveryError()) {
@@ -196,7 +197,7 @@
           </tr>
         </thead>
         <tbody>
-          @for (pullRequest of filteredPullRequests(); track pullRequest.number) {
+          @for (pullRequest of pagedPullRequests(); track pullRequest.number) {
             <tr>
               <td>
                 <a
@@ -304,13 +305,8 @@
     </div>
 
     <footer class="table-footer">
-      <span
-        >Showing {{ filteredPullRequests().length }} of {{ workspace.pullRequests().length }} pull
-        requests</span
-      >
-      @if (workspace.pullRequests().length) {
-        <span class="live-data-label">Live provider data</span>
-      }
+      <span>Showing {{ firstItem() }}–{{ lastItem() }} of {{ filteredPullRequests().length }} pull requests</span>
+      <app-pagination [total]="filteredPullRequests().length" [page]="currentPage()" [pageSize]="pageSize" (pageChange)="requestedPage.set($event)" />
     </footer>
   </section>
 </section>

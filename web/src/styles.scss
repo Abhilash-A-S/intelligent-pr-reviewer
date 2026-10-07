@@ -1,3 +1,4 @@
+@use "sass:meta";
 @import '@fontsource/inter/latin-400.css';
 @import '@fontsource/inter/latin-500.css';
 @import '@fontsource/inter/latin-600.css';
@@ -5558,3 +5559,18 @@ select:focus-visible {
   .brand-mark { flex-basis: 25px; font-size: 16px; }
   .nav-item { font-weight: 500; height: 36px; }
 }
+
+/* Keep integration health immediately beside the appearance control. */
+.topbar-actions { margin-left: auto; justify-content: flex-end; }
+.topbar-health { margin: 0; margin-inline: 0; }
+.health-chip .status-dot { background: var(--text-muted); box-shadow: none; }
+.health-chip.is-connected .status-dot { background: var(--success); animation: connection-pulse 2.8s ease-in-out infinite; }
+.health-chip.is-offline .status-dot { background: var(--danger); }
+.health-chip.is-warning .status-dot { background: var(--warning); }
+.health-chip.is-muted .status-dot,.health-chip.is-checking .status-dot { background: var(--text-muted); }
+@keyframes connection-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb,var(--success) 35%,transparent); } 50% { opacity: .7; box-shadow: 0 0 0 4px transparent; } }
+@media(prefers-reduced-motion:reduce) { .health-chip.is-connected .status-dot { animation:none; } }
+
+@include meta.load-css("./reference-pages");
+
+@include meta.load-css("./approved-design");

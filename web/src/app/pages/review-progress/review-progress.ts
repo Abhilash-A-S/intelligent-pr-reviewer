@@ -219,17 +219,21 @@ export class ReviewProgressPage {
   }
 
   activityFiles(step: ReviewStep): string[] {
-    return this.latestPhaseEvent(step.key)?.files ?? [];
+    return [...(this.job()?.events ?? [])].reverse().find(e => e.phase === step.key && e.files?.length)?.files ?? [];
   }
 
   activityProgress(step: ReviewStep): number {
     if (step.state === 'complete') return 100;
     if (step.state !== 'active') return 0;
-    const event = this.latestPhaseEvent(step.key);
+    const event = [...(this.job()?.events ?? [])].reverse().find(e => e.phase === step.key && e.batch_index && e.batch_total);
     if (event?.batch_index && event.batch_total) {
-      return Math.min(100, Math.max(0, (event.batch_index / event.batch_total) * 100));
+      return Math.min(100, Math.max(0, ((event.batch_index - 1) / event.batch_total) * 100));
     }
-    return Math.min(96, Math.max(8, this.job()?.progress ?? 0));
+    return 0;
+  }
+
+  activityHasProgress(step: ReviewStep): boolean {
+    return (this.job()?.events ?? []).some(e => e.phase === step.key && e.batch_index && e.batch_total);
   }
 
   activityRingOffset(step: ReviewStep): number {
@@ -246,12 +250,11 @@ export class ReviewProgressPage {
 
   diagnosticIcon(event: ReviewEvent): string {
     if (event.level === 'error') return 'x';
-    if (event.phase === 'ai_review') return 'bot';
-    if (event.phase === 'static_analysis') return 'shield-check';
-    if (event.phase === 'publishing') return 'message-square-text';
+    if (event.level === 'success' || event.phase === 'completed') return 'check';
+    
+    
     if (event.phase === 'validation' || event.phase === 'completed') return 'check';
-    if (event.phase === 'discovery') return 'database';
-    return 'activity';
+    return 'info';
   }
 
   private latestPhaseEvent(phase: string): ReviewEvent | undefined {

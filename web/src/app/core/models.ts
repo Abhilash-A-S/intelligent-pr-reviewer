@@ -99,8 +99,8 @@ export interface ChangedFileSummary {
   status: string;
   language: string | null;
   changed_line_count: number;
-  additions?: number;
-  deletions?: number;
+  additions?: number | null;
+  deletions?: number | null;
 }
 
 export interface ChangedFileListResponse {
@@ -233,6 +233,7 @@ export interface ReviewJob {
     decision: string | null;
     findings: number;
     duration_seconds: number | null;
+    severity_counts?: Record<string, number>;
     dry_run: boolean;
   } | null;
   steps: ReviewStep[];
