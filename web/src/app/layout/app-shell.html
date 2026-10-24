@@ -89,15 +89,27 @@
       >
         <app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" />
       </button>
-      <div class="profile-wrapper"><button class="profile-button" type="button" aria-label="Open user menu" [attr.aria-expanded]="profileOpen()" (click)="profileOpen.set(!profileOpen())">
-        <span class="avatar">IR</span>
-        <span class="profile-copy"
-          ><strong>Review engine</strong
-          ><small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small></span
-        >
-        <app-icon name="chevron-down" />
-      </button>
-      @if (profileOpen()) { <div class="profile-popover"><strong>Review engine</strong><small>{{ health()?.version ? 'Version ' + health()?.version : 'Version unavailable' }}</small><a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a><a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a></div> }
+      <div class="profile-wrapper">
+        <button class="profile-button" type="button" aria-label="Open user menu" [attr.aria-expanded]="profileOpen()" (click)="profileOpen.set(!profileOpen())">
+          <span class="avatar">IR</span>
+          <span class="profile-copy">
+            <strong>Review engine</strong>
+            <small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small>
+          </span>
+          <app-icon name="chevron-down" />
+        </button>
+        @if (profileOpen()) {
+          <div class="profile-popover">
+            <div class="popover-header">
+              <strong>Review engine</strong>
+              <small>{{ health()?.version ? 'Version ' + health()?.version : 'Version unavailable' }}</small>
+            </div>
+            <div class="popover-nav">
+              <a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a>
+              <a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a>
+            </div>
+          </div>
+        }
       </div>
       <button
         class="icon-button mobile-menu-button"

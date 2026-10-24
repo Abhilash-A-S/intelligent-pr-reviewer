@@ -13,38 +13,68 @@
   } @else if (result(); as reviewResult) {
     @if (job(); as currentJob) {
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a routerLink="/">Pull requests</a><app-icon name="chevron-right" /><span
-          >PR #{{ reviewResult.pull_request.number }}</span
-        ><app-icon name="chevron-right" /><span>Results</span>
+        <a routerLink="/">Pull requests</a>
+        <app-icon name="chevron-right" />
+        <span>PR #{{ reviewResult.pull_request.number }}</span>
+        <app-icon name="chevron-right" />
+        <span>Results</span>
       </nav>
 
-      <header class="page-heading results-heading heading-with-action sticky-page-heading">
-        <div>
-          <h1>Review results</h1>
-          <p class="result-meta">
-            <span class="compact-job-id" [attr.title]="currentJob.id">Job: {{ currentJob.id.slice(0, 8).toUpperCase() }}{{ currentJob.id.length > 8 ? '…' : '' }}</span><button class="metadata-copy" type="button" aria-label="Copy job ID" (click)="copyJobId()"><app-icon name="copy" /></button><i></i> Completed
-            {{ completedLabel() }}
-            <span class="result-decision" [class.pass]="decisionLabel() === 'PASS'" [class.warning]="decisionLabel() !== 'BLOCK' && decisionLabel() !== 'PASS'"
-              ><app-icon [name]="decisionLabel() === 'BLOCK' ? 'ban' : 'shield-check'" />{{
-                decisionLabel() === 'BLOCK' ? 'Block merge' : decisionLabel()
-              }}</span
-            >
+      <!-- Header: title, decision, context, actions -->
+      <header class="page-heading results-heading sticky-page-heading rr-header">
+        <div class="rr-header-main">
+          <div class="rr-title-row">
+            <h1>Review results</h1>
+            <span class="rr-decision" [class]="'rr-decision decision-' + decisionTone()">
+              <app-icon [name]="decisionTone() === 'block' ? 'ban' : decisionTone() === 'pass' ? 'shield-check' : 'triangle-alert'" />
+              {{ decisionText() }}
+            </span>
+          </div>
+          <p class="rr-context">
+            <span class="rr-context-pr">
+              <strong>PR #{{ reviewResult.pull_request.number }}</strong>
+              @if (prTitle()) {
+                <span class="rr-context-title" [attr.title]="prTitle()">{{ prTitle() }}</span>
+              }
+            </span>
+            @if (repositoryName()) {
+              <span class="rr-context-item" [attr.title]="reviewResult.pull_request.repository">
+                <app-icon name="database" />{{ repositoryName() }}
+              </span>
+            }
+            <span class="rr-context-item">
+              <app-icon name="clock-3" />Completed {{ completedLabel() }}
+            </span>
+            <span class="rr-context-item rr-job-id" [attr.title]="currentJob.id">
+              <code>{{ currentJob.id.slice(0, 8).toUpperCase() }}</code>
+              <button class="metadata-copy" type="button" aria-label="Copy job ID" (click)="copyJobId()">
+                <app-icon name="copy" />
+              </button>
+            </span>
           </p>
         </div>
-        <div class="heading-actions"><a class="button secondary" [routerLink]="['/pull-requests', reviewResult.pull_request.number]" [queryParams]="{provider: reviewResult.pull_request.provider, repository: reviewResult.pull_request.repository}"><app-icon name="git-pull-request" />View PR</a>            @if (reviewResult.dry_run) {
-              <button
-                class="button primary"
-                type="button"
-                [disabled]="publishing()"
-                (click)="publishConfirmationOpen.set(true)"
-              >
-                <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish to PR' }}
-              </button>
-            }
-            <button class="button secondary" type="button" (click)="downloadJson()">
-              <app-icon name="file-text" />Export report
+        <div class="heading-actions">
+          <a
+            class="button secondary"
+            [routerLink]="['/pull-requests', reviewResult.pull_request.number]"
+            [queryParams]="{ provider: reviewResult.pull_request.provider, repository: reviewResult.pull_request.repository }"
+          >
+            <app-icon name="git-pull-request" />View PR
+          </a>
+          <button class="button secondary" type="button" (click)="downloadJson()">
+            <app-icon name="download" />Export
+          </button>
+          @if (reviewResult.dry_run) {
+            <button
+              class="button primary"
+              type="button"
+              [disabled]="publishing()"
+              (click)="publishConfirmationOpen.set(true)"
+            >
+              <app-icon name="rocket" />{{ publishing() ? 'Starting…' : 'Publish to PR' }}
             </button>
-</div>
+          }
+        </div>
       </header>
 
       @if (error()) {
@@ -53,141 +83,238 @@
         </div>
       }
 
-      <div class="severity-grid">
-        <article class="severity-card critical">
-          <span><app-icon name="circle-alert" /></span>
-          <div>
-            <small>Critical</small><strong>{{ reviewResult.quality_gate.critical_count }}</strong>
+      <!-- Single summary bar: severities + run stats + distribution -->
+      <section class="rr-summary" aria-label="Review summary">
+        <div class="rr-summary-row">
+          <div class="rr-severity-stats">
+            @for (level of severities; track level) {
+              <button
+                type="button"
+                class="rr-severity-stat sev-{{ level }}"
+                [class.is-selected]="severity() === level"
+                [attr.aria-pressed]="severity() === level"
+                [attr.title]="'Show only ' + level + ' findings'"
+                (click)="toggleSeverityFilter(level)"
+              >
+                <strong>{{ severityCount(level) }}</strong>
+                <span><i class="rr-dot"></i>{{ level }}</span>
+              </button>
+            }
           </div>
-        </article>
-        <article class="severity-card high">
-          <span><app-icon name="circle-arrow-up" /></span>
-          <div>
-            <small>High</small><strong>{{ reviewResult.quality_gate.high_count }}</strong>
-          </div>
-        </article>
-        <article class="severity-card medium">
-          <span><app-icon name="triangle-alert" /></span>
-          <div>
-            <small>Medium</small><strong>{{ reviewResult.quality_gate.medium_count }}</strong>
-          </div>
-        </article>
-        <article class="severity-card low">
-          <span><app-icon name="info" /></span>
-          <div>
-            <small>Low</small><strong>{{ reviewResult.quality_gate.low_count }}</strong>
-          </div>
-        </article>
-        <article class="severity-card total">
-          <span><app-icon name="file-text" /></span>
-          <div>
-            <small>Total</small><strong>{{ totalFindings() }}</strong>
-          </div>
-        </article>
-      </div>
-
-      <section class="run-metadata" aria-label="Review metrics">
-        <div><app-icon name="files" /><span><strong>{{ reviewResult.diagnostics.changed_files }}</strong> changed files</span></div>
-        <div><app-icon name="search" /><span><strong>{{ totalFindings() - reviewResult.diagnostics.final_ai_findings }}</strong> static findings</span></div>
-        <div><app-icon name="cpu" /><span><strong>{{ reviewResult.diagnostics.final_ai_findings }}</strong> AI finding{{ reviewResult.diagnostics.final_ai_findings === 1 ? '' : 's' }}</span></div>
-        <div [attr.title]="'Review depth: ' + reviewResult.diagnostics.review_depth"><app-icon name="clock-3" /><span><strong>{{ durationLabel() }}</strong> review time</span></div>
+          <dl class="rr-run-stats">
+            <div>
+              <dt>Changed files</dt>
+              <dd>{{ reviewResult.diagnostics.changed_files }}</dd>
+            </div>
+            <div>
+              <dt>Static</dt>
+              <dd>{{ staticFindingCount() }}</dd>
+            </div>
+            <div>
+              <dt>AI</dt>
+              <dd>{{ reviewResult.diagnostics.final_ai_findings }}</dd>
+            </div>
+            <div [attr.title]="'Review depth: ' + reviewResult.diagnostics.review_depth">
+              <dt>Duration</dt>
+              <dd>{{ durationLabel() }}</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="rr-distribution" aria-hidden="true">
+          @for (level of severities; track level) {
+            @if (severityCount(level)) {
+              <span class="sev-{{ level }}" [style.flex-grow]="severityCount(level)"></span>
+            }
+          }
+        </div>
       </section>
 
-      <div class="results-layout">
-        <div class="findings-column">
-          <section class="card findings-panel">
-            <div class="findings-toolbar">
-              <h2>Findings ({{ totalFindings() }})</h2>
-              <label class="search-field findings-search"><app-icon name="search" /><input type="search" aria-label="Search findings" placeholder="Search findings..." [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
-              <div class="findings-filter-grid">
-                <label><span>Severity</span><app-smart-select [options]="severityOptions" [value]="severity()" ariaLabel="Filter by severity" (valueChange)="setSeverity($event)" /></label>
-                <label><span>Source</span><app-smart-select [options]="sourceOptions" [value]="source()" ariaLabel="Filter by finding source" (valueChange)="setSource($event)" /></label>
-                <label><span>Project</span><app-smart-select [options]="projectOptions()" [value]="project()" ariaLabel="Filter by project" (valueChange)="project.set($event)" /></label>
-                <label><span>Rule</span><app-smart-select [options]="ruleOptions()" [value]="rule()" ariaLabel="Filter by rule" (valueChange)="rule.set($event)" /></label>
-              </div>
+      <div class="rr-layout">
+        <!-- Findings -->
+        <section class="rr-findings" aria-labelledby="rr-findings-title">
+          <div class="rr-toolbar">
+            <div class="rr-toolbar-title">
+              <h2 id="rr-findings-title">Findings</h2>
+              <span class="rr-count">
+                {{ visibleFindings().length === totalFindings() ? totalFindings() : visibleFindings().length + ' of ' + totalFindings() }}
+              </span>
+              @if (hasActiveFilters()) {
+                <button type="button" class="rr-clear" (click)="clearFilters()">Clear filters</button>
+              }
             </div>
-          <div class="finding-list">
+            <div class="rr-toolbar-controls">
+              <label class="rr-search">
+                <app-icon name="search" />
+                <input
+                  type="search"
+                  aria-label="Search findings"
+                  placeholder="Search rule, file, or message"
+                  [ngModel]="search()"
+                  (ngModelChange)="search.set($event)"
+                />
+              </label>
+              <app-smart-select class="rr-filter" [options]="severityOptions" [value]="severity()" ariaLabel="Filter by severity" (valueChange)="setSeverity($event)" />
+              <app-smart-select class="rr-filter" [options]="sourceOptions" [value]="source()" ariaLabel="Filter by finding source" (valueChange)="setSource($event)" />
+              <app-smart-select class="rr-filter" [options]="projectOptions()" [value]="project()" ariaLabel="Filter by project" (valueChange)="project.set($event)" />
+              <app-smart-select class="rr-filter" [options]="ruleOptions()" [value]="rule()" ariaLabel="Filter by rule" (valueChange)="rule.set($event)" />
+            </div>
+          </div>
+
+          <div class="rr-finding-list">
             @for (
               finding of visibleFindings();
               track finding.file_path + ':' + finding.line_number + ':' + finding.rule_id
             ) {
-              <article [class]="'finding-card ' + finding.severity" [class.expanded]="isExpanded(finding)">
-                <button class="finding-summary" type="button" [attr.aria-expanded]="isExpanded(finding)" [attr.aria-controls]="'finding-' + $index" (click)="toggleFinding(finding)">
-                  <span class="finding-severity"><app-icon [name]="severityIcon(finding.severity)" />{{ finding.severity }}</span>
-                  <span class="finding-summary-copy"><strong>{{ finding.rule_id }}</strong><small [attr.title]="finding.file_path">{{ filename(finding.file_path) }}:{{ finding.line_number }} <i></i> <span class="capitalize">{{ finding.category ?? 'Code quality' }}</span></small></span>
-                  <span class="finding-source">{{ finding.source === 'llm' ? 'AI' : finding.source }}</span>
-                  <app-icon class="finding-chevron" [name]="isExpanded(finding) ? 'chevron-up' : 'chevron-down'" />
+              <article class="rr-finding sev-{{ finding.severity }}" [class.is-expanded]="isExpanded(finding)">
+                <button
+                  class="rr-finding-row"
+                  type="button"
+                  [attr.aria-expanded]="isExpanded(finding)"
+                  [attr.aria-controls]="'finding-' + $index"
+                  (click)="toggleFinding(finding)"
+                >
+                  <span class="rr-sev-label"><i class="rr-dot"></i>{{ finding.severity }}</span>
+                  <span class="rr-finding-main">
+                    <strong class="rr-rule">{{ finding.rule_id }}</strong>
+                    <span class="rr-category">{{ finding.category ?? 'Code quality' }}</span>
+                  </span>
+                  <code class="rr-location" [attr.title]="finding.file_path">{{ filename(finding.file_path) }}:{{ finding.line_number }}</code>
+                  <span class="rr-source" [class.is-ai]="finding.source === 'llm'">{{ finding.source === 'llm' ? 'AI' : finding.source }}</span>
+                  <app-icon class="rr-chevron" name="chevron-down" />
                 </button>
+
                 @if (isExpanded(finding)) {
-                  <div class="finding-expanded" [id]="'finding-' + $index">
-                    <section><h3>Issue</h3><p>{{ findingIssue(finding) }}</p></section>
-                    @if (finding.impact) { <section><h3>Impact</h3><p>{{ finding.impact }}</p></section> }
-                    @if (finding.evidence) { <section><h3>Evidence</h3><div class="evidence-code"><div class="evidence-lines">@for (line of evidenceLines(finding); track $index) { <div class="evidence-line" [class.changed]="line.number === finding.line_number"><span>{{ line.number }}</span><code>{{ line.text }}</code></div> }</div><button type="button" aria-label="Copy evidence" (click)="copyEvidence(finding)"><app-icon name="copy" /></button></div></section> }
-                    @if (finding.suggestion) { <section><h3>Suggestion</h3><p>{{ finding.suggestion }}</p></section> }
-                    <button class="finding-collapse" type="button" aria-label="Collapse finding" (click)="toggleFinding(finding)"><app-icon name="chevron-up" /></button>
+                  <div class="finding-expanded rr-finding-detail" [id]="'finding-' + $index">
+                    <p class="rr-file-path"><app-icon name="file-code-2" />{{ finding.file_path }}<span>· line {{ finding.line_number }}</span></p>
+
+                    <div class="rr-detail-grid">
+                      <section class="rr-detail-block">
+                        <h3>Issue</h3>
+                        <p>{{ findingIssue(finding) }}</p>
+                      </section>
+                      @if (finding.impact) {
+                        <section class="rr-detail-block">
+                          <h3>Impact</h3>
+                          <p>{{ finding.impact }}</p>
+                        </section>
+                      }
+                    </div>
+
+                    @if (finding.evidence) {
+                      <section class="rr-detail-block">
+                        <h3>Evidence</h3>
+                        <div class="rr-code">
+                          <div class="rr-code-lines">
+                            @for (line of evidenceLines(finding); track $index) {
+                              <div class="rr-code-line" [class.is-flagged]="line.number === finding.line_number">
+                                <span class="rr-line-no">{{ line.number }}</span>
+                                <code>{{ line.text }}</code>
+                              </div>
+                            }
+                          </div>
+                          <button class="rr-code-copy" type="button" aria-label="Copy evidence" title="Copy" (click)="copyEvidence(finding)">
+                            <app-icon name="copy" />
+                          </button>
+                        </div>
+                      </section>
+                    }
+
+                    @if (finding.suggestion) {
+                      <section class="rr-detail-block rr-suggestion">
+                        <h3>Suggested fix</h3>
+                        <p>{{ finding.suggestion }}</p>
+                      </section>
+                    }
                   </div>
                 }
               </article>
             } @empty {
-              <div class="card empty-state">
-                <app-icon name="shield-check" /><strong>{{
+              <div class="rr-empty">
+                <app-icon name="shield-check" />
+                <strong>{{
                   totalFindings() ? 'No findings match these filters' : 'No meaningful issues found'
-                }}</strong
-                ><span>{{
+                }}</strong>
+                <span>{{
                   totalFindings()
                     ? 'Change the selected severity, source, or search text.'
                     : 'The completed review passed without reportable findings.'
                 }}</span>
+                @if (totalFindings()) {
+                  <button type="button" class="button secondary" (click)="clearFilters()">Clear filters</button>
+                }
               </div>
             }
           </div>
-          </section>
-          <span class="copy-status" role="status">{{ copyStatus() }}</span>
-        </div>
+          <span class="sr-only" role="status">{{ copyStatus() }}</span>
+        </section>
 
-        <aside class="results-sidebar">
-          <section class="card gate-card">
-            <h2>Quality Gate</h2>
-            <div class="quality-gate-banner" [class.pass]="decisionLabel() === 'PASS'" [class.warning]="decisionLabel() !== 'BLOCK' && decisionLabel() !== 'PASS'">
-              <app-icon [name]="decisionLabel() === 'BLOCK' ? 'ban' : 'shield-check'" />
-              <div><strong>{{ decisionLabel() === 'BLOCK' ? 'Block Merge' : decisionLabel() === 'PASS' ? 'Ready to Merge' : decisionLabel() }}</strong><small>{{ gateDescription() }}</small></div>
+        <!-- Sticky sidebar -->
+        <aside class="rr-sidebar">
+          <section class="rr-side-card">
+            <h2>Quality gate</h2>
+            <div class="rr-gate" [class]="'rr-gate gate-' + decisionTone()">
+              <span class="rr-gate-icon">
+                <app-icon [name]="decisionTone() === 'block' ? 'ban' : decisionTone() === 'pass' ? 'shield-check' : 'triangle-alert'" />
+              </span>
+              <div>
+                <strong>{{ decisionText() }}</strong>
+                <p>{{ gateDescription() }}</p>
+              </div>
             </div>
-            <h3>Findings by severity</h3>
-            <ul class="severity-bars">
-              @for (level of severities; track level) { <li [class]="level"><span>{{ level }}</span><i><b [style.width.%]="totalFindings() ? severityCount(level) / totalFindings() * 100 : 0"></b></i><strong>{{ severityCount(level) }}</strong></li> }
+            <ul class="rr-gate-rules">
+              <li [class.is-failing]="severityCount('critical') > 0">
+                <app-icon [name]="severityCount('critical') > 0 ? 'x' : 'check'" />
+                <span>Critical issues</span>
+                <strong>{{ severityCount('critical') }}</strong>
+              </li>
+              <li [class.is-warning]="severityCount('high') > 0">
+                <app-icon [name]="severityCount('high') > 0 ? 'triangle-alert' : 'check'" />
+                <span>High issues</span>
+                <strong>{{ severityCount('high') }}</strong>
+              </li>
             </ul>
           </section>
 
-          <section class="card publishing-card">
-            <div class="card-heading">
-              <div>
-                <h2>Publishing</h2>
-                <p>Provider comment status</p>
-              </div>
+          <section class="rr-side-card">
+            <div class="rr-side-heading">
+              <h2>Publishing</h2>
+              <span class="rr-status-pill" [class.is-published]="!reviewResult.dry_run">
+                {{ reviewResult.dry_run ? 'Dry run' : 'Published' }}
+              </span>
             </div>
-            <div class="publish-mode">
-              <span
-                ><app-icon [name]="reviewResult.dry_run ? 'eye' : 'message-square-text'"
-              /></span>
-              <div>
-                <strong>{{ reviewResult.dry_run ? 'Dry run only' : 'Published' }}</strong
-                ><small>{{
-                  reviewResult.dry_run
-                    ? 'Nothing was written to the provider.'
-                    : 'Review comments were sent safely.'
-                }}</small>
-              </div>
-            </div>
-            <ul class="publishing-stats">
-              <li><app-icon name="message-square-text" /><span><strong>{{ reviewResult.publishing.published_comments.length }}</strong> inline comments</span></li>
-              <li><app-icon name="git-branch" /><span><strong>{{ reviewResult.publishing.skipped_duplicates }}</strong> duplicates skipped</span></li>
-              <li [class.has-failures]="reviewResult.publishing.failed_comments.length > 0"><app-icon name="triangle-alert" /><span><strong>{{ reviewResult.publishing.failed_comments.length }}</strong> failures</span></li>
+            <p class="rr-side-copy">
+              {{
+                reviewResult.dry_run
+                  ? 'Nothing has been posted to the pull request yet.'
+                  : 'Review comments were posted to the pull request.'
+              }}
+            </p>
+            <ul class="publishing-stats rr-publish-stats">
+              <li><span><strong>{{ reviewResult.publishing.published_comments.length }}</strong> inline comments</span></li>
+              <li><span><strong>{{ reviewResult.publishing.skipped_duplicates }}</strong> duplicates skipped</span></li>
+              <li [class.has-failures]="reviewResult.publishing.failed_comments.length > 0">
+                <span><strong>{{ reviewResult.publishing.failed_comments.length }}</strong> failures</span>
+              </li>
             </ul>
           </section>
 
-          <section class="card rejected-card">
-            <button type="button" [attr.aria-expanded]="rejectedOpen()" aria-controls="rejected-content" (click)="rejectedOpen.set(!rejectedOpen())">Rejected AI findings ({{ rejectedAiFindings() }})<app-icon [name]="rejectedOpen() ? 'chevron-up' : 'chevron-down'" /></button>
-            @if (rejectedOpen()) { <div class="rejected-content" id="rejected-content"><p>The validation pipeline rejected speculative or duplicate semantic findings before the quality gate.</p></div> }
+          <section class="rr-side-card rr-rejected">
+            <button
+              type="button"
+              class="rr-rejected-toggle"
+              [attr.aria-expanded]="rejectedOpen()"
+              aria-controls="rejected-content"
+              (click)="rejectedOpen.set(!rejectedOpen())"
+            >
+              <span>Rejected AI findings</span>
+              <span class="rr-rejected-count">{{ rejectedAiFindings() }}</span>
+              <app-icon [name]="rejectedOpen() ? 'chevron-up' : 'chevron-down'" />
+            </button>
+            @if (rejectedOpen()) {
+              <p class="rr-side-copy" id="rejected-content">
+                The validation pipeline rejected speculative or duplicate semantic findings before the quality gate.
+              </p>
+            }
           </section>
         </aside>
       </div>
@@ -235,8 +362,9 @@
       </p>
       <div class="modal-actions">
         <button class="button secondary" type="button" (click)="publishConfirmationOpen.set(false)">
-          Cancel</button
-        ><button class="button danger" type="button" (click)="publish()">
+          Cancel
+        </button>
+        <button class="button danger" type="button" (click)="publish()">
           <app-icon name="rocket" />Confirm publish
         </button>
       </div>

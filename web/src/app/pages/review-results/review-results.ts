@@ -34,9 +34,9 @@ export class ReviewResultsPage {
   readonly rejectedOpen = signal(false);
   readonly copyStatus = signal('');
   readonly severities: Severity[] = ['critical', 'high', 'medium', 'low'];
-  readonly ruleOptions = computed(() => [{ value: 'all', label: 'All' },
+  readonly ruleOptions = computed(() => [{ value: 'all', label: 'All rules' },
     ...[...new Set((this.result()?.findings ?? []).map(f => f.rule_id))].sort().map(value => ({ value, label: value }))]);
-  readonly projectOptions = computed(() => [{ value: 'all', label: 'All' },
+  readonly projectOptions = computed(() => [{ value: 'all', label: 'All projects' },
     ...[...new Set((this.result()?.findings ?? []).map(f => this.findingProject(f)))].sort().map(value => ({ value, label: value }))]);
 
   findingProject(finding: ReviewFinding): string {
@@ -80,7 +80,7 @@ export class ReviewResultsPage {
   readonly publishConfirmationOpen = signal(false);
   readonly publishing = signal(false);
   readonly severityOptions: SmartSelectOption[] = [
-    { value: 'all', label: 'All' },
+    { value: 'all', label: 'All severities' },
     { value: 'critical', label: 'Critical' },
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
@@ -88,11 +88,59 @@ export class ReviewResultsPage {
     { value: 'suggestion', label: 'Suggestion' },
   ];
   readonly sourceOptions: SmartSelectOption[] = [
-    { value: 'all', label: 'All' },
+    { value: 'all', label: 'All sources' },
     { value: 'static', label: 'Static' },
     { value: 'framework', label: 'Framework' },
     { value: 'llm', label: 'AI semantic' },
   ];
+
+  readonly prTitle = computed(
+    () => this.result()?.pull_request?.title ?? this.job()?.result_summary?.title ?? '',
+  );
+
+  readonly repositoryName = computed(() => {
+    const repo = this.result()?.pull_request?.repository ?? '';
+    return repo.split('/').filter(Boolean).at(-1) ?? '';
+  });
+
+  readonly staticFindingCount = computed(() =>
+    Math.max(0, this.totalFindings() - (this.result()?.diagnostics.final_ai_findings ?? 0)),
+  );
+
+  readonly hasActiveFilters = computed(
+    () =>
+      this.severity() !== 'all' ||
+      this.source() !== 'all' ||
+      this.project() !== 'all' ||
+      this.rule() !== 'all' ||
+      !!this.search().trim(),
+  );
+
+  decisionTone(): 'block' | 'pass' | 'warn' {
+    const decision = this.result()?.quality_gate.decision;
+    if (decision === 'block') return 'block';
+    if (decision === 'pass') return 'pass';
+    return 'warn';
+  }
+
+  decisionText(): string {
+    const tone = this.decisionTone();
+    if (tone === 'block') return 'Merge blocked';
+    if (tone === 'pass') return 'Ready to merge';
+    return 'Needs attention';
+  }
+
+  toggleSeverityFilter(level: Severity): void {
+    this.severity.set(this.severity() === level ? 'all' : level);
+  }
+
+  clearFilters(): void {
+    this.severity.set('all');
+    this.source.set('all');
+    this.project.set('all');
+    this.rule.set('all');
+    this.search.set('');
+  }
 
   readonly visibleFindings = computed(() => {
     const severity = this.severity();
@@ -186,7 +234,7 @@ export class ReviewResultsPage {
     if (severity === 'critical') return 'circle-alert';
     if (severity === 'high') return 'circle-arrow-up';
     if (severity === 'medium') return 'triangle-alert';
-    if (severity === 'low') return 'circle-alert';
+    if (severity === 'low') return 'info';
     return 'sparkles';
   }
 

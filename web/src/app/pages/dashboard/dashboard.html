@@ -1,18 +1,9 @@
 <section class="page dashboard-page">
-  <header class="page-heading heading-with-action sticky-page-heading">
+  <header class="page-heading dashboard-heading sticky-page-heading">
     <div>
       <h1>Pull Requests</h1>
-      <p>Select a pull request to review</p>
+      <p>Select a pull request to review and monitor automated analysis</p>
     </div>
-    <div class="heading-actions">      <button
-        class="button primary"
-        type="button"
-        [disabled]="workspace.loading()"
-        (click)="workspace.refreshPullRequests()"
-      >
-        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
-        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
-      </button></div>
   </header>
 
   <section class="card repository-filter" aria-labelledby="repository-filter-title">
@@ -34,6 +25,16 @@
           <app-provider-mark provider="azure-devops" /> Azure DevOps
         </button>
       </div>
+
+      <button
+        class="button primary refresh-button"
+        type="button"
+        [disabled]="workspace.loading()"
+        (click)="workspace.refreshPullRequests()"
+      >
+        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
+        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
+      </button>
     </div>
 
     <div class="filter-grid" [class.github-grid]="workspace.provider() === 'github'">

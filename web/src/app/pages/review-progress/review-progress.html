@@ -1,36 +1,138 @@
 <section class="page review-progress-page">
   @if (loading()) {
-    <nav class="breadcrumb" aria-label="Breadcrumb"><a routerLink="/">Pull Requests</a><app-icon name="chevron-right" /><span>Review</span></nav>
-    <section class="card route-state-card" aria-live="polite"><span class="empty-illustration loading"><app-icon name="loader-circle" /></span><h1>Loading review progress</h1><p>Retrieving the current job state from the review engine.</p></section>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a routerLink="/">Pull Requests</a>
+      <app-icon name="chevron-right" />
+      <span>Review</span>
+    </nav>
+    <section class="card route-state-card" aria-live="polite">
+      <span class="empty-illustration loading"><app-icon name="loader-circle" /></span>
+      <h1>Loading review progress</h1>
+      <p>Retrieving the current job state from the review engine.</p>
+    </section>
   } @else if (job(); as currentJob) {
     <nav class="breadcrumb" aria-label="Breadcrumb">
-      <a routerLink="/">Pull Requests</a><app-icon name="chevron-right" />
-      <span>PR #{{ currentJob.command.pull_number }}</span><app-icon name="chevron-right" />
+      <a routerLink="/">Pull Requests</a>
+      <app-icon name="chevron-right" />
+      <span>PR #{{ currentJob.command.pull_number }}</span>
+      <app-icon name="chevron-right" />
       <span>Review</span>
     </nav>
 
     <header class="page-heading progress-heading sticky-page-heading">
-      <div>
-        <h1>Review in progress</h1>
-        <p><span class="job-id">{{ currentJob.id.slice(0, 12).toUpperCase() }}</span><span class="running-pill"><span></span>{{ currentJob.status === 'completed' ? 'Completed' : currentJob.status === 'failed' ? 'Failed' : currentJob.status === 'cancelled' ? 'Cancelled' : 'Running' }}</span></p>
+      <div class="progress-heading-left">
+        <div class="heading-title-line">
+          <h1>{{ pageTitle() }}</h1>
+          <span class="running-pill status-{{ currentJob.status }}">
+            <span class="pulse-dot"></span>
+            {{ statusLabel(currentJob.status) }}
+          </span>
+        </div>
+        <div class="progress-context-chips">
+          <span class="context-chip pr-chip">
+            <strong>PR #{{ currentJob.command.pull_number }}</strong>
+            <span class="chip-sep">·</span>
+            <span class="pr-title-text">{{ pullRequest()?.title ?? currentJob.result_summary?.title ?? 'Adding Initial commits' }}</span>
+          </span>
+          <span class="context-chip repo-chip" [attr.title]="currentJob.command.repository">
+            <app-icon name="database" />
+            <span>{{ repositoryName() }}</span>
+          </span>
+          <span class="context-chip id-chip" title="Review job ID">
+            <code>{{ currentJob.id.slice(0, 12).toUpperCase() }}</code>
+            <button type="button" class="copy-id-btn" aria-label="Copy job ID" (click)="copyJobId()">
+              <app-icon name="copy" />
+            </button>
+            @if (copyStatus()) {
+              <small class="copy-hint">{{ copyStatus() }}</small>
+            }
+          </span>
+        </div>
       </div>
       <div class="heading-actions">
-        <a class="button primary" routerLink="/">Run in background <app-icon name="external-link" /></a>
-        <button class="button ghost-danger" type="button" [disabled]="cancelling() || currentJob.status !== 'queued'" [attr.title]="currentJob.status === 'running' ? 'The current engine supports cancelling queued reviews only.' : null" (click)="cancel()">{{ cancelling() ? 'Cancelling…' : 'Cancel review' }}</button>
+        @if (isActive()) {
+          <a class="button outline-secondary" routerLink="/">
+            <span>Run in background</span>
+            <app-icon name="external-link" />
+          </a>
+          <button
+            class="button ghost-danger"
+            type="button"
+            [disabled]="cancelling() || currentJob.status !== 'queued'"
+            [attr.title]="currentJob.status === 'running' ? 'The current engine supports cancelling queued reviews only.' : null"
+            (click)="requestCancel()"
+          >
+            {{ cancelling() ? 'Cancelling…' : 'Cancel review' }}
+          </button>
+        } @else if (currentJob.status === 'completed') {
+          <a class="button solid-primary" [routerLink]="['/reviews', currentJob.id, 'results']">
+            <span>View results</span>
+            <app-icon name="arrow-right" />
+          </a>
+        } @else {
+          <a class="button outline-secondary" routerLink="/history">
+            <span>Review history</span>
+          </a>
+        }
       </div>
     </header>
 
     @if (error() || currentJob.error) {
-      <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() ?? currentJob.error }}</span></div>
+      <div class="inline-alert error-alert" role="alert">
+        <app-icon name="circle-alert" />
+        <span>{{ error() ?? currentJob.error }}</span>
+      </div>
     }
 
+    <!-- Overall Progress Hero -->
     <section class="card progress-hero">
-      <div class="progress-title"><strong>Overall progress</strong><b>{{ currentJob.progress }}%</b></div>
-      <div class="progress-track" role="progressbar" [attr.aria-valuenow]="currentJob.progress" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="currentJob.progress"></span></div>
-      <div class="progress-stage-copy"><span>{{ currentJob.phase.replace('_', ' ') }}</span><i></i><span>{{ currentJob.message }}</span></div>
-      <div class="progress-meta"><span><app-icon name="clock-3" /><small>Elapsed time</small><strong>{{ elapsed() }}</strong></span><span><app-icon name="clock-3" /><small>Estimated remaining</small><strong>{{ estimatedRemaining() }}</strong></span></div>
+      <div class="progress-hero-top">
+        <div class="progress-title-cluster">
+          <div class="progress-title">
+            <strong>Overall progress</strong>
+            <b class="progress-percent">{{ currentJob.progress }}%</b>
+          </div>
+          @if (isActive() && activeBatchInfo(); as batch) {
+            <span class="batch-status-pill">
+              <app-icon name="sparkles" />
+              <span>Batch {{ batch.current }} of {{ batch.total }} · {{ batch.fileCount }} {{ batch.fileCount === 1 ? 'file' : 'files' }}</span>
+            </span>
+          }
+        </div>
+        <div class="progress-meta">
+          <span class="meta-timer" [attr.title]="isActive() ? 'Elapsed review time' : 'Total review time'">
+            <app-icon name="clock-3" />
+            <small>{{ isActive() ? 'Elapsed' : 'Duration' }}</small>
+            <strong>{{ elapsed() }}</strong>
+          </span>
+          @if (isActive()) {
+            <span class="meta-timer" title="Estimate based on progress so far; adjusts as files are processed">
+              <app-icon name="timer" />
+              <small>Est. remaining</small>
+              <strong>~{{ estimatedRemaining() }}</strong>
+            </span>
+          }
+        </div>
+      </div>
+
+      <div class="progress-track" role="progressbar" [attr.aria-valuenow]="currentJob.progress" aria-valuemin="0" aria-valuemax="100">
+        <span class="progress-fill" [class.is-done]="currentJob.status === 'completed'" [style.width.%]="currentJob.progress"></span>
+      </div>
+
+      <div class="progress-info-row">
+        <div class="progress-stage-copy">
+          @if (isActive()) {
+            <span class="phase-badge">{{ currentJob.phase.replace('_', ' ') }}</span>
+          }
+          <span class="phase-text">{{ currentJob.message }}</span>
+        </div>
+        @if (isActive()) {
+          <span class="progress-disclaimer">Remaining time is an estimate</span>
+        }
+      </div>
     </section>
 
+    <!-- Horizontal Review Stepper -->
     <ol class="review-stepper horizontal-stepper" aria-label="Review pipeline">
       @for (step of currentJob.steps; track step.key; let last = $last) {
         <li [class]="step.state">
@@ -41,49 +143,125 @@
       }
     </ol>
 
+    <!-- 4 Telemetry Metrics with Explanations -->
     <div class="progress-metrics">
-      <article class="progress-metric"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ changedFileCount() }}</strong><small>Changed files</small></div></article>
-      <article class="progress-metric teal"><span class="metric-icon"><app-icon name="file-text" /></span><div><strong>{{ reviewFileCount() }}</strong><small>Review files</small></div></article>
-      <article class="progress-metric warning"><span class="metric-icon"><app-icon name="triangle-alert" /></span><div><strong>{{ staticFindingCount() }}</strong><small>Static findings</small></div></article>
-      <article class="progress-metric violet"><span class="metric-icon"><app-icon name="cpu" /></span><div><strong>{{ llmCallCount() }}</strong><small>LLM calls · actual / planned</small></div></article>
+      <article class="progress-metric" title="Total changed files discovered from git diff">
+        <span class="metric-icon files"><app-icon name="file-text" /></span>
+        <div class="metric-info">
+          <strong>{{ changedFileCount() }}</strong>
+          <small>Changed files</small>
+        </div>
+      </article>
+
+      <article
+        class="progress-metric teal"
+        [attr.title]="skippedCount() > 0 ? (skippedCount() + ' non-code or lockfiles skipped from deep analysis') : 'All files analyzed'"
+      >
+        <span class="metric-icon review-files"><app-icon name="file-text" /></span>
+        <div class="metric-info">
+          <strong>{{ reviewFileCount() }}</strong>
+          <small>Files to review</small>
+          @if (skippedCount() > 0) {
+            <span class="metric-subtag">{{ skippedCount() }} skipped</span>
+          }
+        </div>
+      </article>
+
+      <article class="progress-metric warning" title="Static analysis lint, security, and pattern findings">
+        <span class="metric-icon findings"><app-icon name="triangle-alert" /></span>
+        <div class="metric-info">
+          <strong>{{ staticFindingCount() }}</strong>
+          <small>Static findings</small>
+        </div>
+      </article>
+
+      <article class="progress-metric violet" title="AI model requests for semantic code review batches">
+        <span class="metric-icon ai"><app-icon name="cpu" /></span>
+        <div class="metric-info">
+          <strong>{{ llmCallCount() }}</strong>
+          <small>AI requests</small>
+        </div>
+      </article>
     </div>
 
+    <!-- Balanced Lower Detail Grid -->
     <div class="progress-detail-grid">
+      <!-- Left Panel: Current Activity (vertical timeline) -->
       <section class="card activity-panel">
-        <div class="card-heading"><div><h2>Current activity</h2><p>Processing files and running AI review</p></div></div>
-        <ol class="activity-list">
-          @for (step of activitySteps(); track step.key) {
-            <li [class]="step.state">
-              <span class="activity-state" aria-hidden="true">
-                @if (step.state === 'active') {
-                  <svg class="activity-progress-ring" viewBox="0 0 24 24">
-                    <circle class="activity-progress-track" cx="12" cy="12" r="9" />
-                    <circle
-                      class="activity-progress-value"
-                      cx="12"
-                      cy="12"
-                      r="9"
-                      [attr.stroke-dasharray]="activityRingCircumference"
-                      [attr.stroke-dashoffset]="activityRingOffset(step)"
-                    />
-                  </svg>
-                } @else {
-                  <app-icon [name]="stepIcon(step.state)" />
-                }
-              </span>
-              <div class="activity-content">
-                <div class="activity-title-row">
-                  <strong>{{ activityTitle(step) }}</strong>
-                  <em>{{ activityTime(step) }}</em>
+        <header class="panel-header">
+          <h2>Current activity</h2>
+          <span class="panel-header-meta">{{ completedStageCount() }} of {{ activitySteps().length }} stages complete</span>
+        </header>
+
+        <ol class="activity-timeline">
+          @for (step of activitySteps(); track step.key; let last = $last) {
+            <li [class]="'timeline-step state-' + step.state">
+              <div class="timeline-rail" aria-hidden="true">
+                <span class="timeline-marker">
+                  @if (step.state === 'complete') {
+                    <app-icon name="check" />
+                  } @else if (step.state === 'failed') {
+                    <app-icon name="x" />
+                  } @else if (step.state === 'active') {
+                    <span class="marker-spinner"></span>
+                  }
+                </span>
+                @if (!last) { <span class="timeline-connector"></span> }
+              </div>
+
+              <div class="timeline-body">
+                <div class="timeline-title-row">
+                  <strong class="timeline-title">{{ activityLabel(step) }}</strong>
+                  @if (step.state === 'active' && activeBatchInfo(); as batch) {
+                    <span class="timeline-status is-active">Batch {{ batch.current }} of {{ batch.total }}</span>
+                  } @else {
+                    <span class="timeline-status" [class.is-active]="step.state === 'active'">{{ activityTime(step) }}</span>
+                  }
                 </div>
-                <small>{{ activityMessage(step) }}</small>
-                @if (step.state === 'active') {
-                  <div class="activity-progress-bar" role="progressbar" aria-label="Current activity batch progress" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="activityHasProgress(step) ? activityProgress(step) : null" [attr.aria-valuetext]="activityHasProgress(step) ? activityProgress(step) + '% of batches completed' : 'In progress; percentage unavailable'" [class.indeterminate]="!activityHasProgress(step)"><span [style.width.%]="activityHasProgress(step) ? activityProgress(step) : 35"></span></div>
+
+                @if (step.state !== 'pending') {
+                  @if (severityBreakdown(step).length) {
+                    <div class="timeline-detail severity-detail">
+                      <span>{{ findingTotal(step) }} findings</span>
+                      <span class="severity-chips">
+                        @for (item of severityBreakdown(step); track item.level) {
+                          <span class="severity-chip sev-{{ item.level }}">{{ item.count }} {{ item.level }}</span>
+                        }
+                      </span>
+                    </div>
+                  } @else {
+                    <p class="timeline-detail">{{ activityMessage(step) }}</p>
+                  }
                 }
-                @if (activityFiles(step).length) {
+
+                @if (step.state === 'active') {
+                  <div class="timeline-progress">
+                    <div
+                      class="activity-progress-bar"
+                      role="progressbar"
+                      aria-label="Current activity batch progress"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      [attr.aria-valuenow]="activityHasProgress(step) ? activityProgress(step) : null"
+                      [attr.aria-valuetext]="activityHasProgress(step) ? activityProgress(step) + '% of batches completed' : 'In progress; percentage unavailable'"
+                      [class.indeterminate]="!activityHasProgress(step)"
+                    >
+                      <span [style.width.%]="activityHasProgress(step) ? activityProgress(step) : 35"></span>
+                    </div>
+                    @if (activityHasProgress(step)) {
+                      <span class="timeline-progress-value">{{ activityProgress(step).toFixed(0) }}%</span>
+                    }
+                  </div>
+                }
+
+                @if (step.state === 'active' && activityFiles(step).length) {
                   <ul class="activity-files" aria-label="Files in the current review batch">
                     @for (file of activityFiles(step); track file) {
-                      <li><app-icon name="file-code-2" /><code>{{ file }}</code></li>
+                      <li class="activity-file-row" [attr.title]="file">
+                        <span class="file-glyph"><app-icon name="file-code-2" /></span>
+                        <span class="file-name">{{ splitFilePath(file).name }}</span>
+                        <span class="file-dir"><span class="sr-only">{{ file }}</span>{{ splitFilePath(file).path }}</span>
+                      </li>
                     }
                   </ul>
                 }
@@ -93,9 +271,15 @@
         </ol>
       </section>
 
-      <section class="card diagnostics-panel">
-        <div class="card-heading diagnostics-heading">
-          <div><h2>Live diagnostics</h2><p>Provider-neutral review events</p></div>
+      <!-- Right Panel: Live Diagnostics -->
+      <section class="card diagnostics-panel" [class.is-expanded]="logsExpanded()">
+        <header class="panel-header">
+          <div class="panel-header-title">
+            <h2>Live diagnostics</h2>
+            @if (currentJob.status === 'running' || currentJob.status === 'queued') {
+              <span class="live-indicator"><span></span>Live</span>
+            }
+          </div>
           <div class="diagnostic-controls">
             <app-smart-select
               [options]="diagnosticOptions"
@@ -103,35 +287,79 @@
               ariaLabel="Filter diagnostic events"
               (valueChange)="setDiagnosticFilter($event)"
             />
-            <span class="live-dot"><span></span>Live</span>
+            <button
+              class="expand-logs-btn"
+              type="button"
+              [attr.aria-label]="logsExpanded() ? 'Collapse logs' : 'Expand logs'"
+              [attr.title]="logsExpanded() ? 'Collapse logs' : 'Expand logs'"
+              (click)="logsExpanded.set(!logsExpanded())"
+            >
+              <app-icon [name]="logsExpanded() ? 'minimize-2' : 'maximize-2'" />
+            </button>
           </div>
-        </div>
-        <ol class="diagnostic-events">
+        </header>
+
+        <ol class="log-list">
           @for (event of diagnosticEvents(); track event.id) {
-            <li [class]="event.level">
-              <time>{{ diagnosticTime(event) }}</time>
-              <span class="event-state"><app-icon [name]="diagnosticIcon(event)" /></span>
-              <div>
-                <strong>{{ event.title }}</strong>
-                <small>{{ event.detail }}</small>
-                @if (event.token_count !== null) {
-                  <span class="event-meta">{{ event.token_count }} tokens</span>
+            <li [class]="'log-row level-' + event.level">
+              <time class="log-time">{{ diagnosticTime(event) }}</time>
+              <span class="log-icon"><app-icon [name]="diagnosticIcon(event)" /></span>
+              <div class="log-body">
+                <div class="log-title-row">
+                  <strong class="log-title">{{ event.title }}</strong>
+                  @if (event.token_count !== null) {
+                    <span class="log-meta">{{ event.token_count }} tokens</span>
+                  }
+                </div>
+                @if (event.detail) {
+                  <p class="log-detail">{{ event.detail }}</p>
                 }
               </div>
             </li>
           } @empty {
-            <li class="diagnostic-empty"><span>Waiting for matching review events…</span></li>
+            <li class="log-empty">Waiting for matching review events…</li>
           }
         </ol>
       </section>
     </div>
-
-    @if (currentJob.status === 'completed') {
-      <div class="progress-complete-action"><a class="button primary" [routerLink]="['/reviews', currentJob.id, 'results']">View review results <app-icon name="arrow-right" /></a></div>
-    }
   } @else {
-    <nav class="breadcrumb" aria-label="Breadcrumb"><a routerLink="/">Pull Requests</a><app-icon name="chevron-right" /><span>Unavailable</span></nav>
-    <div class="inline-alert error-alert" role="alert"><app-icon name="circle-alert" /><span>{{ error() ?? 'The review job could not be loaded.' }}</span></div>
-    <section class="card route-state-card"><span class="empty-illustration"><app-icon name="history" /></span><h1>Review job unavailable</h1><p>The job may belong to a previous API process or the identifier may be invalid.</p><a class="button primary" routerLink="/history">Open review history</a></section>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a routerLink="/">Pull Requests</a>
+      <app-icon name="chevron-right" />
+      <span>Unavailable</span>
+    </nav>
+    <div class="inline-alert error-alert" role="alert">
+      <app-icon name="circle-alert" />
+      <span>{{ error() ?? 'The review job could not be loaded.' }}</span>
+    </div>
+    <section class="card route-state-card">
+      <span class="empty-illustration"><app-icon name="history" /></span>
+      <h1>Review job unavailable</h1>
+      <p>The job may belong to a previous API process or the identifier may be invalid.</p>
+      <a class="button primary" routerLink="/history">Open review history</a>
+    </section>
   }
 </section>
+
+<!-- Cancel Review Confirmation Modal -->
+@if (cancelConfirmationOpen()) {
+  @if (job(); as currentJob) {
+    <div class="modal-backdrop" (click)="cancelConfirmationOpen.set(false)"></div>
+    <section class="cancel-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-modal-title">
+      <button class="icon-button modal-close" type="button" aria-label="Close dialog" (click)="cancelConfirmationOpen.set(false)">
+        <app-icon name="x" />
+      </button>
+      <span class="cancel-modal-icon"><app-icon name="octagon-alert" /></span>
+      <div class="cancel-modal-copy">
+        <h2 id="cancel-modal-title">Cancel review?</h2>
+        <p>This will abort the in-progress review for <strong>PR #{{ currentJob.command.pull_number }}</strong>. Any partial analysis will not be published.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="button secondary" type="button" (click)="cancelConfirmationOpen.set(false)">Continue review</button>
+        <button class="button danger" type="button" [disabled]="cancelling()" (click)="confirmCancel()">
+          {{ cancelling() ? 'Cancelling…' : 'Yes, cancel review' }}
+        </button>
+      </div>
+    </section>
+  }
+}
