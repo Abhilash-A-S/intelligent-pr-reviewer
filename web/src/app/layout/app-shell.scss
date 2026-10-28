@@ -1,0 +1,15 @@
+/* The access screen uses the full viewport without reserving sidebar space. */
+.app-frame.no-repositories {
+  padding-left: 0;
+  transition: none;
+}
+.repository-access-message {
+  width: min(720px, calc(100% - 32px));
+  margin: clamp(24px, 8vh, 80px) auto;
+  padding: clamp(20px, 4vw, 36px);
+  h2 { margin-top: 0; }
+  p { line-height: 1.6; }
+  code { overflow-wrap: anywhere; user-select: all; }
+  .copy-status { margin-bottom: 0; }
+  .copy-status:empty { display: none; }
+}

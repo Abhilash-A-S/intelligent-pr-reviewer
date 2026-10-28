@@ -26,3 +26,9 @@ Live Entra/company sign-in could not be exercised without an organization app re
 The uploaded Review in Progress page already overflows horizontally at mobile widths with long activity filenames (baseline: 390px viewport / 414px document). This was reproduced using the unmodified uploaded UI, left unchanged and recorded as an existing design issue. Other checked routes and the new sign-in page fit the tested viewports. Browser screenshots were used only for internal inspection and are not included as deliverables.
 
 This release implements authentication/authorization, not all audit remediation. Review jobs/history are still in memory; durable review storage, restart recovery, admission/retention limits and generalized error sanitization remain planned work. The SQLite database added here persists authentication sessions, not review jobs.
+
+## No repository access screen
+
+The shared app shell now replaces routed page content with the repository-access message when the authenticated account has no assigned repositories. Desktop and mobile navigation, profile page links, and integration chips are hidden. Theme selection and the account menu with sign out remain available. The full Account ID wraps on narrow screens and can be copied, with an accessible success or failure message. Refresh after policy changes restores the normal app once repositories are assigned. Backend authorization is unchanged.
+
+Validation: all 48 frontend unit tests pass, including shell visibility and restoration after assignment. Production embedded build passes (existing initial bundle budget warning remains).

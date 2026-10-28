@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   DestroyRef,
   HostListener,
   inject,
@@ -22,6 +23,7 @@ import { RevealSections } from '../shared/reveal-sections';
   selector: 'app-shell',
   imports: [RouterOutlet, RouterLink, Icon, ProviderMark, RevealSections],
   templateUrl: './app-shell.html',
+  styleUrl: './app-shell.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppShell {
@@ -30,6 +32,20 @@ export class AppShell {
   private readonly destroyRef = inject(DestroyRef);
   readonly auth = inject(AuthService);
   readonly theme = inject(ThemeService);
+  readonly noRepositories = computed(() => this.auth.user()?.repositories.length === 0);
+  readonly copyStatus = signal('');
+
+  async copyAccountId(): Promise<void> {
+    const accountId = this.auth.user()?.id;
+    if (!accountId) return;
+    try {
+      await navigator.clipboard.writeText(accountId);
+      this.copyStatus.set('Account ID copied.');
+    } catch {
+      this.copyStatus.set('Could not copy. Please select and copy the Account ID above.');
+    }
+  }
+
   readonly sidebarCollapsed = signal(false);
   readonly mobileNavigationOpen = signal(false);
   readonly mobileHealthOpen = signal(false);

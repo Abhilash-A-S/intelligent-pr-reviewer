@@ -1,3 +1,4 @@
+import { AuthService } from '../core/auth.service';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
@@ -29,4 +30,28 @@ describe('AppShell PR navigation and health', () => {
     expect(chips[2].classList.contains('is-checking')).toBeTrue();
     expect(chips[2].classList.contains('is-connected')).toBeFalse();
   });
+  it('shows only the access screen and header controls without assigned repositories', () => {
+    const auth = TestBed.inject(AuthService);
+    auth.user.set({ id: 'https://issuer.example/v2.0|account', name: 'Test User', csrf_token: 'test', repositories: [] });
+    const fixture = TestBed.createComponent(AppShell);
+    fixture.componentInstance.currentPath.set('/history');
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('h2')?.textContent).toBe('No repositories assigned');
+    expect(element.querySelector('code')?.textContent).toBe(auth.user()!.id);
+    expect(element.querySelector('router-outlet')).toBeNull();
+    expect(element.querySelector('.sidebar')).toBeNull();
+    expect(element.querySelector('.mobile-menu-button')).toBeNull();
+    expect(element.querySelector('.health-chip')).toBeNull();
+    expect(element.querySelector('.theme-toggle')).not.toBeNull();
+    fixture.componentInstance.profileOpen.set(true); fixture.detectChanges();
+    expect(element.querySelector('.popover-nav')?.textContent).toContain('Sign out');
+    expect(element.querySelector('.popover-nav a')).toBeNull();
+    auth.user.update(user => ({ ...user!, repositories: [{ provider: 'github', repository: 'owner/repo', role: 'viewer', can_review: false, can_publish: false, can_admin: false }] }));
+    fixture.detectChanges();
+    expect(element.querySelector('.repository-access-message')).toBeNull();
+    expect(element.querySelector('.sidebar')).not.toBeNull();
+    expect(element.querySelector('router-outlet')).not.toBeNull();
+  });
+
 });

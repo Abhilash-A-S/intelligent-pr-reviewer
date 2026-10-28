@@ -1,5 +1,6 @@
 <div
   class="app-frame"
+  [class.no-repositories]="noRepositories()"
   [class.dashboard-route]="currentPath() === '/'"
   [class.history-route]="currentPath() === '/history'"
   [class.pr-detail-route]="currentPath().startsWith('/pull-requests/')"
@@ -18,6 +19,7 @@
     </a>
 
     <div class="topbar-actions">
+      @if (!noRepositories()) {
       <div class="topbar-health" aria-label="Integration health">
         <span
           class="health-chip"
@@ -81,6 +83,7 @@
           </div>
         }
       </div>
+      }
       <button
         class="icon-button theme-toggle"
         type="button"
@@ -105,12 +108,15 @@
               <small>Signed in to your workspace</small>
             </div>
             <div class="popover-nav"><button class="button secondary" type="button" (click)="auth.logout()">Sign out</button>
+              @if (!noRepositories()) {
               <a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a>
               <a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a>
+              }
             </div>
           </div>
         }
       </div>
+      @if (!noRepositories()) {
       <button
         class="icon-button mobile-menu-button"
         type="button"
@@ -121,9 +127,11 @@
       >
         <app-icon name="menu" />
       </button>
+      }
     </div>
   </header>
 
+  @if (!noRepositories()) {
   <aside id="primary-navigation" class="sidebar" aria-label="Primary navigation">
     <nav>
       @for (item of navigation; track item.route) {
@@ -149,9 +157,20 @@
     (click)="closeMobileNavigation()"
   ></button>
 
+  }
+
   <main id="main-content" class="main-content" appRevealSections>
     @if(auth.message()){<div class="inline-alert warning-alert" role="alert">{{auth.message()}}<button class="icon-button" type="button" aria-label="Dismiss message" (click)="auth.message.set('')"><app-icon name="x" /></button></div>}
-    @if(auth.user()?.repositories?.length === 0){<section class="card" style="margin:24px;padding:24px"><h2>No repositories assigned</h2><p>You are signed in, but your administrator has not assigned repository access.</p><p>Account ID: <code style="overflow-wrap:anywhere">{{auth.user()?.id}}</code></p></section>}
-    <router-outlet />
+    @if (noRepositories()) {
+      <section class="card repository-access-message" aria-labelledby="repository-access-heading">
+        <h2 id="repository-access-heading">No repositories assigned</h2>
+        <p>You are signed in, but your administrator has not assigned repository access.</p>
+        <p>Account ID: <code>{{ auth.user()?.id }}</code></p>
+        <button class="button secondary" type="button" (click)="copyAccountId()">Copy Account ID</button>
+        <p class="copy-status" role="status">{{ copyStatus() }}</p>
+      </section>
+    } @else {
+      <router-outlet />
+    }
   </main>
 </div>
