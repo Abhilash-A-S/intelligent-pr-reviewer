@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/auth.service';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import {
@@ -33,6 +34,7 @@ describe('PullRequestPage context header', () => {
     TestBed.configureTestingModule({
       imports: [PullRequestPage],
       providers: [
+        { provide: AuthService, useValue: { canReview:()=>true, canPublish:()=>true, canCancel:()=>true } },
         provideRouter([]),
         provideLucideIcons(
           LucideAtom, LucideFlaskConical, LucideExternalLink,

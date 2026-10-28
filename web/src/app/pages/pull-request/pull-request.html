@@ -48,11 +48,11 @@
       </div>
 
       <div class="heading-actions">
-        <button class="button primary" type="button" [disabled]="submitting()" (click)="startReview(false)">
+        <button class="button primary" type="button" [disabled]="submitting() || !auth.canReview(provider(),repository())" (click)="startReview(false)">
           <app-icon name="play" />
           <span>{{ submitting() ? 'Starting…' : 'Run Dry Review' }}</span>
         </button>
-        <button class="button publish-outline" type="button" [disabled]="submitting()" (click)="requestPublish()">
+        <button class="button publish-outline" type="button" [disabled]="submitting() || !auth.canPublish(provider(),repository())" (click)="requestPublish()">
           <app-icon name="external-link" />
           <span>Publish Review</span>
         </button>
@@ -270,11 +270,11 @@
           </fieldset>
 
           <div class="sidebar-review-actions">
-            <button class="button primary wide" type="button" [disabled]="submitting()" (click)="startReview(false)">
+            <button class="button primary wide" type="button" [disabled]="submitting() || !auth.canReview(provider(),repository())" (click)="startReview(false)">
               <app-icon name="play" />
               <span>{{ submitting() ? 'Starting…' : 'Run Dry Review' }}</span>
             </button>
-            <button class="button publish-outline wide" type="button" [disabled]="submitting()" (click)="requestPublish()">
+            <button class="button publish-outline wide" type="button" [disabled]="submitting() || !auth.canPublish(provider(),repository())" (click)="requestPublish()">
               <app-icon name="external-link" />
               <span>Publish Review</span>
             </button>

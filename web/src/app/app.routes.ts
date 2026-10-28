@@ -1,11 +1,15 @@
 import { Routes } from '@angular/router';
 
+import { authGuard } from './core/auth.service';
 import { AppShell } from './layout/app-shell';
 
 export const routes: Routes = [
+  {path:'login',title:'Sign in · Intelligent PR Reviewer',loadComponent:()=>import('./pages/login/login').then(m=>m.LoginPage)},
   {
     path: '',
     component: AppShell,
+    canActivate: [authGuard],
+    canActivateChild: [authGuard],
     children: [
       {
         path: '',

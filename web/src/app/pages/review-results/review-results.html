@@ -64,7 +64,7 @@
           <button class="button secondary" type="button" (click)="downloadJson()">
             <app-icon name="download" />Export
           </button>
-          @if (reviewResult.dry_run) {
+          @if (reviewResult.dry_run && auth.canPublish(reviewResult.pull_request.provider,reviewResult.pull_request.repository)) {
             <button
               class="button primary"
               type="button"

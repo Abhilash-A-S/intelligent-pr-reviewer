@@ -37,6 +37,10 @@ shows an intentional empty state instead of sample content.
 - Node.js supported by Angular 20 (Node 20.19+, 22.12+ or 24+)
 - Ollama when semantic review is enabled
 
+## Shared-team authentication
+
+The web application now requires configured company sign-in and explicit repository grants. Follow [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md) before using the UI/API. Provider tokens alone do not sign users in. Keep the policy and SQLite session database outside source control. Job/history persistence remains a separate next stage.
+
 ## First-time setup
 
 ```powershell

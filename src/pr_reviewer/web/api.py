@@ -4,11 +4,16 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 import os
+import logging
+import json
+import time
 from pathlib import Path
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from pr_reviewer.web.security import AuthService, Principal, canonical_repository
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -236,9 +241,7 @@ def _discovery_payload(
             for item in serialized
             if term
             in " ".join(
-                str(value)
-                for value in item.values()
-                if value is not None
+                str(value) for value in item.values() if value is not None
             ).casefold()
         ]
     total = len(serialized)
@@ -262,8 +265,30 @@ def _ui_static_root() -> Path:
     return project_root / "web" / "dist" / "reviewer-ui" / "browser"
 
 
-def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
-    manager = job_manager or ReviewJobManager()
+def create_app(
+    *,
+    job_manager: ReviewJobManager | None = None,
+    auth_service: AuthService | None = None,
+) -> FastAPI:
+    auth = auth_service or AuthService()
+
+    def execution_guard(command):
+        if (
+            not command.owner_id
+            or not command.owner_auth_expires_at
+            or command.owner_auth_expires_at <= time.time()
+        ):
+            raise PermissionError(
+                "Review authorization has expired; sign in and start a new review"
+            )
+        auth.policy.require(
+            Principal(command.owner_id, command.owner_name or "", command.owner_groups),
+            command.provider,
+            command.repository,
+            3 if command.publish else 2,
+        )
+
+    manager = job_manager or ReviewJobManager(execution_guard=execution_guard)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -276,12 +301,53 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+    app.state.auth = auth
+    auth.mount(app)
+
+    @app.middleware("http")
+    async def authenticate(request: Request, call_next):
+        protected = (
+            request.url.path.startswith("/api/")
+            and not request.url.path.startswith("/api/auth/")
+        ) or request.url.path in {"/docs", "/redoc", "/openapi.json"}
+        if protected and request.method != "OPTIONS":
+            try:
+                request.state.user = auth.current(request)
+            except HTTPException as exc:
+                return JSONResponse(
+                    {"detail": exc.detail},
+                    status_code=exc.status_code,
+                    headers={"Cache-Control": "no-store"},
+                )
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
+            if request.url.path == "/api/auth/callback":
+                response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    def permissions(request):
+        return auth.policy.permissions(request.state.user)
+
+    def job_permission(request, item):
+        command = item.get("command") or {}
+        try:
+            repo = canonical_repository(
+                command.get("provider", ""), command.get("repository", "")
+            )
+        except (ValueError, AttributeError):
+            return 0
+        return permissions(request).get((command.get("provider"), repo), 0)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_configured_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-CSRF-Token"],
     )
 
     @app.get("/api/health")
@@ -290,9 +356,7 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         probe_providers: bool = False,
     ) -> dict:
         try:
-            max_inline_comments = int(
-                os.getenv("PR_REVIEW_MAX_INLINE_COMMENTS", "40")
-            )
+            max_inline_comments = int(os.getenv("PR_REVIEW_MAX_INLINE_COMMENTS", "40"))
         except ValueError:
             max_inline_comments = 40
         return {
@@ -314,52 +378,99 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
 
     @app.get("/api/repository-discovery/organizations")
     def discover_organizations(
+        http_request: Request,
         provider: str,
         query: Annotated[str, Query(max_length=200)] = "",
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        allowed = {
+            r.split("/")[0] for (p, r) in permissions(http_request) if p == provider
+        }
+        if not allowed:
+            return _discovery_payload(provider, [], query, limit)
         adapter = _provider_or_http_error(provider)
         try:
-            items = adapter.list_organizations()
+            items = [
+                i for i in adapter.list_organizations() if i.name.casefold() in allowed
+            ]
         except Exception as exc:
             raise _provider_failure(exc) from exc
         return _discovery_payload(provider, items, query, limit)
 
     @app.get("/api/repository-discovery/projects")
     def discover_projects(
+        http_request: Request,
         provider: str,
         organization: Annotated[str, Query(min_length=1, max_length=200)],
         query: Annotated[str, Query(max_length=200)] = "",
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        allowed = {
+            r.split("/")[1]
+            for (p, r) in permissions(http_request)
+            if p == provider and r.split("/")[0] == organization.casefold()
+        }
+        if not allowed:
+            raise HTTPException(403, "Organization access denied")
         adapter = _provider_or_http_error(provider)
         try:
-            items = adapter.list_projects(organization)
+            items = [
+                i
+                for i in adapter.list_projects(organization)
+                if i.name.casefold() in allowed
+            ]
         except Exception as exc:
             raise _provider_failure(exc) from exc
         return _discovery_payload(provider, items, query, limit)
 
     @app.get("/api/repository-discovery/repositories")
     def discover_repositories(
+        http_request: Request,
         provider: str,
         organization: Annotated[str, Query(min_length=1, max_length=200)],
         project: Annotated[str | None, Query(max_length=200)] = None,
         query: Annotated[str, Query(max_length=200)] = "",
         limit: Annotated[int, Query(ge=1, le=500)] = 300,
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        allowed = {
+            r
+            for (p, r) in permissions(http_request)
+            if p == provider
+            and r.split("/")[0] == organization.casefold()
+            and (
+                provider != "azure-devops"
+                or r.split("/")[1] == (project or "").casefold()
+            )
+        }
+        if not allowed:
+            raise HTTPException(403, "Repository discovery access denied")
         adapter = _provider_or_http_error(provider)
         try:
-            items = adapter.list_repositories(organization, project)
+            items = []
+            for item in adapter.list_repositories(organization, project):
+                identifier = (
+                    "/".join([organization, item.name])
+                    if provider == "github"
+                    else "/".join([organization, project or "", item.name])
+                )
+                if canonical_repository(provider, identifier) in allowed:
+                    items.append(item)
         except Exception as exc:
             raise _provider_failure(exc) from exc
         return _discovery_payload(provider, items, query, limit)
 
     @app.get("/api/pull-requests")
     def pull_requests(
+        http_request: Request,
         provider: str,
         repository: Annotated[str, Query(min_length=1, max_length=500)],
         state: Literal["open", "closed", "all"] = "open",
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        repository = auth.policy.require(http_request.state.user, provider, repository)
         adapter = _provider_or_http_error(provider)
         try:
             items = adapter.list_pull_requests(repository, state=state)
@@ -379,10 +490,13 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
 
     @app.get("/api/pull-requests/{pull_number}")
     def pull_request(
+        http_request: Request,
         pull_number: int,
         provider: str,
         repository: Annotated[str, Query(min_length=1, max_length=500)],
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        repository = auth.policy.require(http_request.state.user, provider, repository)
         adapter = _provider_or_http_error(provider)
         try:
             item = adapter.get_pull_request(repository, pull_number)
@@ -392,10 +506,13 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
 
     @app.get("/api/pull-requests/{pull_number}/files")
     def changed_files(
+        http_request: Request,
         pull_number: int,
         provider: str,
         repository: Annotated[str, Query(min_length=1, max_length=500)],
     ) -> dict:
+        provider = normalize_provider_name(provider)
+        repository = auth.policy.require(http_request.state.user, provider, repository)
         adapter = _provider_or_http_error(provider)
         try:
             files = adapter.get_changed_files(repository, pull_number)
@@ -423,17 +540,21 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
         }
 
     @app.post("/api/reviews", status_code=status.HTTP_202_ACCEPTED)
-    def create_review(request: ReviewCreateRequest) -> dict:
+    def create_review(request: ReviewCreateRequest, http_request: Request) -> dict:
         normalized = normalize_provider_name(request.provider)
         if normalized not in PROVIDER_NAMES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported provider: {request.provider}",
             )
+        repository = auth.policy.require(
+            http_request.state.user,
+            normalized,
+            request.repository,
+            3 if request.publish else 2,
+        )
         connected = next(
-            item["connected"]
-            for item in _provider_status()
-            if item["id"] == normalized
+            item["connected"] for item in _provider_status() if item["id"] == normalized
         )
         if not connected:
             env_name = "GITHUB_TOKEN" if normalized == "github" else "AZURE_DEVOPS_PAT"
@@ -441,31 +562,64 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
                 status_code=503,
                 detail=f"{env_name} is not configured on the API server.",
             )
-        return manager.submit(
+        submitted = manager.submit(
             ReviewCommand(
                 provider=normalized,
-                repository=request.repository,
+                repository=repository,
                 pull_number=request.pull_number,
                 review_depth=request.review_depth,
                 publish=request.publish,
                 max_workers=request.max_workers,
+                owner_id=http_request.state.user.id,
+                owner_name=http_request.state.user.name,
+                owner_auth_expires_at=http_request.state.session["_expires_at"],
+                owner_groups=http_request.state.user.groups,
             )
         )
+        logging.getLogger("pr_reviewer.audit").info(
+            json.dumps(
+                {
+                    "event": "review_requested",
+                    "actor": http_request.state.user.id,
+                    "repository": repository,
+                    "provider": normalized,
+                    "publish": request.publish,
+                    "job_id": submitted["id"],
+                }
+            )
+        )
+        return submitted
 
     @app.get("/api/reviews")
-    def reviews(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> dict:
-        items = manager.list(limit=limit)
+    def reviews(
+        http_request: Request, limit: Annotated[int, Query(ge=1, le=200)] = 50
+    ) -> dict:
+        items = manager.list(
+            limit=limit, predicate=lambda item: job_permission(http_request, item) >= 1
+        )
         return {"items": items, "total": len(items)}
 
     @app.get("/api/reviews/{job_id}")
-    def review(job_id: str, include_result: bool = True) -> dict:
+    def review(job_id: str, http_request: Request, include_result: bool = True) -> dict:
         item = manager.get(job_id, include_result=include_result)
-        if item is None:
+        if item is None or not job_permission(http_request, item):
             raise HTTPException(status_code=404, detail="Review job not found")
         return item
 
     @app.delete("/api/reviews/{job_id}")
-    def cancel_review(job_id: str) -> dict:
+    def cancel_review(job_id: str, http_request: Request) -> dict:
+        item = manager.get(job_id, include_result=False)
+        level = job_permission(http_request, item) if item else 0
+        if not level:
+            raise HTTPException(404, "Review job not found")
+        if level < 4 and (
+            level < 2
+            or (item.get("command") or {}).get("owner_id") != http_request.state.user.id
+        ):
+            raise HTTPException(
+                403,
+                "Only the job owner or a repository administrator may cancel this review",
+            )
         cancelled = manager.cancel(job_id)
         if cancelled is None:
             raise HTTPException(status_code=404, detail="Review job not found")
@@ -474,6 +628,15 @@ def create_app(*, job_manager: ReviewJobManager | None = None) -> FastAPI:
                 status_code=409,
                 detail="A running review cannot be interrupted safely.",
             )
+        logging.getLogger("pr_reviewer.audit").info(
+            json.dumps(
+                {
+                    "event": "review_cancelled",
+                    "actor": http_request.state.user.id,
+                    "job_id": job_id,
+                }
+            )
+        )
         return {"id": job_id, "status": "cancelled"}
 
     static_root = _ui_static_root()

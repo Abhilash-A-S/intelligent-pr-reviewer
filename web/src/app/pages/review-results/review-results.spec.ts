@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/auth.service';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
@@ -21,7 +22,7 @@ describe('ReviewResultsPage', () => {
       publishing: { published_comments: [], failed_comments: [], skipped_duplicates: 0 }, dry_run: true,
     }} as unknown as ReviewJob;
     TestBed.configureTestingModule({ imports: [ReviewResultsPage], providers: [
-      ...appConfig.providers, provideRouter([]), { provide: ActivatedRoute, useValue: { snapshot: { paramMap: new Map([['jobId', 'test']]) } } },
+      ...appConfig.providers, { provide: AuthService, useValue: { canReview:()=>true, canPublish:()=>true, canCancel:()=>true } }, provideRouter([]), { provide: ActivatedRoute, useValue: { snapshot: { paramMap: new Map([['jobId', 'test']]) } } },
       { provide: ReviewerApi, useValue: { getReview: () => of(job) } },
     ] });
   });

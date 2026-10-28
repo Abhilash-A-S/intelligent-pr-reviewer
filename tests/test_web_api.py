@@ -1,3 +1,8 @@
+import json
+import time
+import pytest
+from pr_reviewer.web.security import AuthService, AuthSettings
+
 from unittest.mock import Mock
 
 import httpx
@@ -14,6 +19,24 @@ from pr_reviewer.review.models import ChangedFile, ChangedLine, PullRequest
 from pr_reviewer.web import api as web_api
 
 
+@pytest.fixture(autouse=True)
+def authenticated_api_regression(monkeypatch, tmp_path):
+    policy = tmp_path / 'access.json'
+    policy.write_text(json.dumps({'grants':[{'subjects':['https://identity.example|tester'],'role':'administrator',
+        'repositories':{'github':['acme/store','acme/reviewer'],'azure-devops':['acme/platform/reviewer','org/project/repo']}}]}))
+    # The public URL must use HTTPS outside loopback; regression TestClient uses HTTPS.
+    auth = AuthService(AuthSettings('https://identity.example','client','secret','https://testserver',str(policy),str(tmp_path/'auth.db')))
+    auth._save('session','test-session',{'id':'https://identity.example|tester','name':'Tester','groups':[],'csrf':'test-csrf'},time.time()+600)
+    original_app = web_api.create_app
+    monkeypatch.setattr(web_api,'create_app',lambda **kwargs:original_app(auth_service=auth,**kwargs))
+    original_client = TestClient
+    def client(app,**kwargs):
+        instance=original_client(app,base_url='https://testserver',**kwargs)
+        instance.cookies.set(auth.SESSION,'test-session');instance.headers['X-CSRF-Token']='test-csrf'
+        return instance
+    monkeypatch.setattr(__import__(__name__,fromlist=['TestClient']),'TestClient',client)
+
+
 class StubJobManager:
     def __init__(self):
         self.submitted = None
@@ -22,7 +45,7 @@ class StubJobManager:
         self.submitted = command
         return {"id": "job-1", "status": "queued"}
 
-    def list(self, limit=50):
+    def list(self, limit=50, predicate=None):
         return [{"id": "job-1", "status": "completed"}][:limit]
 
     def get(self, job_id, include_result=True):

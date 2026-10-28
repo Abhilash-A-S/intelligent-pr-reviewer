@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, HostListener, ViewEncapsulation, co
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 
+import { AuthService } from '../../core/auth.service';
 import { ReviewerApi } from '../../core/api.service';
 import {
   ChangedFileSummary,
@@ -25,6 +26,7 @@ export class PullRequestPage {
   readonly Math = Math;
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
   private readonly preferences = inject(ReviewPreferencesService);
 
@@ -105,6 +107,7 @@ export class PullRequestPage {
   }
 
   requestPublish(): void {
+    if (!this.auth.canPublish(this.provider(),this.repository())) return;
     this.publishConfirmationOpen.set(true);
   }
 
@@ -113,6 +116,7 @@ export class PullRequestPage {
   }
 
   startReview(publish: boolean): void {
+    if (publish ? !this.auth.canPublish(this.provider(),this.repository()) : !this.auth.canReview(this.provider(),this.repository())) { this.error.set("You do not have permission for this action."); return; }
     const pullRequest = this.pullRequest();
     if (!pullRequest) {
       this.error.set('Pull request metadata must load before a review can start.');

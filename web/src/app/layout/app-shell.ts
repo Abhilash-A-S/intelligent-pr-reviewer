@@ -10,6 +10,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 
+import { AuthService } from '../core/auth.service';
 import { ReviewerApi } from '../core/api.service';
 import { HealthResponse, ProviderStatus } from '../core/models';
 import { ThemeService } from '../core/theme.service';
@@ -27,6 +28,7 @@ export class AppShell {
   private readonly api = inject(ReviewerApi);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  readonly auth = inject(AuthService);
   readonly theme = inject(ThemeService);
   readonly sidebarCollapsed = signal(false);
   readonly mobileNavigationOpen = signal(false);

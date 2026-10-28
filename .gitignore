@@ -25,3 +25,9 @@ web/coverage/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Server-side identity/session data and local access policy
+/data/
+access-policy.json
+*.sqlite3
+*.sqlite3-*

@@ -91,9 +91,9 @@
       </button>
       <div class="profile-wrapper">
         <button class="profile-button" type="button" aria-label="Open user menu" [attr.aria-expanded]="profileOpen()" (click)="profileOpen.set(!profileOpen())">
-          <span class="avatar">IR</span>
+          <span class="avatar">{{ auth.user()?.name?.slice(0, 2)?.toUpperCase() || 'IR' }}</span>
           <span class="profile-copy">
-            <strong>Review engine</strong>
+            <strong>{{ auth.user()?.name }}</strong>
             <small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small>
           </span>
           <app-icon name="chevron-down" />
@@ -101,10 +101,10 @@
         @if (profileOpen()) {
           <div class="profile-popover">
             <div class="popover-header">
-              <strong>Review engine</strong>
-              <small>{{ health()?.version ? 'Version ' + health()?.version : 'Version unavailable' }}</small>
+              <strong>{{ auth.user()?.name }}</strong>
+              <small>Signed in to your workspace</small>
             </div>
-            <div class="popover-nav">
+            <div class="popover-nav"><button class="button secondary" type="button" (click)="auth.logout()">Sign out</button>
               <a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a>
               <a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a>
             </div>
@@ -150,6 +150,8 @@
   ></button>
 
   <main id="main-content" class="main-content" appRevealSections>
+    @if(auth.message()){<div class="inline-alert warning-alert" role="alert">{{auth.message()}}<button class="icon-button" type="button" aria-label="Dismiss message" (click)="auth.message.set('')"><app-icon name="x" /></button></div>}
+    @if(auth.user()?.repositories?.length === 0){<section class="card" style="margin:24px;padding:24px"><h2>No repositories assigned</h2><p>You are signed in, but your administrator has not assigned repository access.</p><p>Account ID: <code style="overflow-wrap:anywhere">{{auth.user()?.id}}</code></p></section>}
     <router-outlet />
   </main>
 </div>

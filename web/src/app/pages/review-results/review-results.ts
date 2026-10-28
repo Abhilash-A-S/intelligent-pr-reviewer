@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, ViewEncapsulation, computed, inject
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
+import { AuthService } from '../../core/auth.service';
 import { ReviewerApi } from '../../core/api.service';
 import { ReviewFinding, ReviewJob, ReviewResult, Severity } from '../../core/models';
 import { Icon } from '../../shared/icon';
@@ -18,6 +19,7 @@ import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 export class ReviewResultsPage {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
 
   readonly jobId = this.route.snapshot.paramMap.get('jobId') ?? '';
@@ -272,6 +274,7 @@ export class ReviewResultsPage {
       this.error.set('The review result is unavailable.');
       return;
     }
+    if (!this.auth.canPublish(current.pull_request.provider,current.pull_request.repository)) { this.error.set("Publishing permission is required."); return; }
     this.publishConfirmationOpen.set(false);
     this.publishing.set(true);
     this.api

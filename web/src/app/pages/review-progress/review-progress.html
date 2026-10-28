@@ -58,7 +58,7 @@
           <button
             class="button ghost-danger"
             type="button"
-            [disabled]="cancelling() || currentJob.status !== 'queued'"
+            [disabled]="!auth.canCancel(currentJob) || cancelling() || currentJob.status !== 'queued'"
             [attr.title]="currentJob.status === 'running' ? 'The current engine supports cancelling queued reviews only.' : null"
             (click)="requestCancel()"
           >

@@ -29,6 +29,10 @@ class ReviewCommand:
     review_depth: str = "standard"
     publish: bool = False
     max_workers: int | None = None
+    owner_id: str | None = None
+    owner_name: str | None = None
+    owner_auth_expires_at: float | None = None
+    owner_groups: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -85,9 +89,30 @@ class ReviewJob:
 
     def snapshot(self, *, include_result: bool = True) -> dict[str, Any]:
         payload = asdict(self)
+        payload["command"].pop("owner_groups", None)
+        payload["command"].pop("owner_auth_expires_at", None)
         if not include_result:
             payload.pop("result", None)
         return jsonable_encoder(payload)
+
+
+class AuthorizedProvider:
+    """Recheck current server policy before provider operations, including writes."""
+
+    def __init__(self, provider, authorize):
+        self._delegate = provider
+        self._authorize = authorize
+
+    def __getattr__(self, name):
+        value = getattr(self._delegate, name)
+        if not callable(value):
+            return value
+
+        def guarded(*args, **kwargs):
+            self._authorize()
+            return value(*args, **kwargs)
+
+        return guarded
 
 
 class ReviewJobManager:
@@ -112,6 +137,7 @@ class ReviewJobManager:
         llm_factory: Callable[[], Any] = OllamaProvider,
         orchestrator_factory: Callable[..., ReviewOrchestrator] = ReviewOrchestrator,
         max_parallel_jobs: int | None = None,
+        execution_guard: Callable[[ReviewCommand], None] | None = None,
     ) -> None:
         configured = max_parallel_jobs
         if configured is None:
@@ -123,6 +149,7 @@ class ReviewJobManager:
             max_workers=max(1, min(configured, 4)),
             thread_name_prefix="pr-review",
         )
+        self._execution_guard = execution_guard
         self._provider_factory = provider_factory
         self._llm_factory = llm_factory
         self._orchestrator_factory = orchestrator_factory
@@ -152,14 +179,28 @@ class ReviewJobManager:
             job = self._jobs.get(job_id)
             return job.snapshot(include_result=include_result) if job else None
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list(
+        self, limit: int = 50, *, predicate: Callable[[dict], bool] | None = None
+    ) -> list[dict[str, Any]]:
         with self._lock:
             ordered = sorted(
                 self._jobs.values(),
                 key=lambda job: job.created_at,
                 reverse=True,
             )
-            return [job.snapshot(include_result=False) for job in ordered[:limit]]
+            snapshots = (job.snapshot(include_result=False) for job in ordered)
+            from itertools import islice
+
+            return list(
+                islice(
+                    (
+                        item
+                        for item in snapshots
+                        if predicate is None or predicate(item)
+                    ),
+                    limit,
+                )
+            )
 
     def cancel(self, job_id: str) -> bool | None:
         with self._lock:
@@ -210,7 +251,13 @@ class ReviewJobManager:
             command = job.command
 
         try:
+            if self._execution_guard is not None:
+                self._execution_guard(command)
             provider = self._provider_factory(command.provider)
+            if self._execution_guard is not None:
+                provider = AuthorizedProvider(
+                    provider, lambda: self._execution_guard(command)
+                )
             llm_provider = self._llm_factory()
             orchestrator = self._orchestrator_factory(
                 provider=provider,

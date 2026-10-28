@@ -9,6 +9,7 @@ def main() -> None:
         host=os.getenv("PR_REVIEW_API_HOST", "127.0.0.1"),
         port=int(os.getenv("PR_REVIEW_API_PORT", "8000")),
         reload=False,
+        access_log=False,  # OIDC callback query strings contain single-use authorization codes.
     )
 
 

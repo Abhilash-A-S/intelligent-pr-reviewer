@@ -11,6 +11,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { catchError, EMPTY, interval, switchMap, takeWhile, tap, timer } from 'rxjs';
 
+import { AuthService } from '../../core/auth.service';
 import { ReviewerApi } from '../../core/api.service';
 import { PullRequestDetail, ReviewEvent, ReviewJob, ReviewStep } from '../../core/models';
 import { Icon } from '../../shared/icon';
@@ -27,6 +28,7 @@ import { SmartSelect, SmartSelectOption } from '../../shared/smart-select';
 export class ReviewProgressPage {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
   private readonly destroyRef = inject(DestroyRef);
   private readonly clock = signal(Date.now());
@@ -187,6 +189,7 @@ export class ReviewProgressPage {
   }
 
   requestCancel(): void {
+    if (!this.job() || !this.auth.canCancel(this.job()!)) return;
     this.cancelConfirmationOpen.set(true);
   }
 
@@ -196,6 +199,7 @@ export class ReviewProgressPage {
   }
 
   cancel(): void {
+    if (!this.job() || !this.auth.canCancel(this.job()!)) return;
     this.cancelling.set(true);
     this.api.cancelReview(this.jobId).subscribe({
       next: () => {

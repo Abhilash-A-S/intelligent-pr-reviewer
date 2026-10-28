@@ -217,7 +217,7 @@ export interface ReviewResult {
 
 export interface ReviewJob {
   id: string;
-  command: ReviewCreateRequest;
+  command: ReviewCreateRequest & { owner_id?: string | null; owner_name?: string | null };
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   phase: string;
   progress: number;
