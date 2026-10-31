@@ -17,6 +17,12 @@ describe('Authentication and permissions',()=>{
   it('restores the opaque cookie session without local token storage',async()=>{
     const promise=auth.restore();http.expectOne('/api/auth/me').flush(user);expect(await promise).toBeTrue();expect(auth.user()?.name).toBe('Alice');
   });
+  it('shares concurrent session discovery without caching later permission checks',async()=>{
+    const first=auth.restore(), second=auth.restore();
+    http.expectOne('/api/auth/me').flush(user);expect(await first).toBeTrue();expect(await second).toBeTrue();
+    const later=auth.restore();http.expectOne('/api/auth/me').flush({...user,repositories:[]});
+    await later;expect(auth.canReview('github','acme/store')).toBeFalse();
+  });
   it('keeps publisher permission separate and repository scoped',()=>{
     auth.user.set(user);expect(auth.canReview('github','ACME/Store')).toBeTrue();expect(auth.canPublish('github','acme/store')).toBeFalse();expect(auth.canReview('github','other/private')).toBeFalse();
   });
@@ -43,5 +49,37 @@ describe('Authentication and permissions',()=>{
   it('route guard rejects unsigned visitors',async()=>{
     const done=TestBed.runInInjectionContext(()=>authGuard({} as any,{} as any)) as Promise<unknown>;
     http.expectOne('/api/auth/me').flush({}, {status:401,statusText:'Unauthorized'});expect(await done).toBeTruthy();expect(auth.user()).toBeNull();
+  });
+});
+
+describe('Provider onboarding route protection',()=>{
+  it('redirects an unconnected user before a protected page can instantiate',async()=>{
+    TestBed.configureTestingModule({providers:[provideRouter([]),provideHttpClient(),provideHttpClientTesting()]});
+    const auth=TestBed.inject(AuthService),http=TestBed.inject(HttpTestingController);
+    const done=TestBed.runInInjectionContext(()=>authGuard({} as any,{url:'/history'} as any)) as Promise<any>;
+    http.expectOne('/api/auth/me').flush({...user,access_mode:'provider',repositories:[]});
+    expect((await done).toString()).toBe('/access');http.verify();
+  });
+  it('lets the access result render for users with no repositories',async()=>{
+    TestBed.configureTestingModule({providers:[provideRouter([]),provideHttpClient(),provideHttpClientTesting()]});
+    const http=TestBed.inject(HttpTestingController);
+    const done=TestBed.runInInjectionContext(()=>authGuard({} as any,{url:'/access'} as any)) as Promise<any>;
+    http.expectOne('/api/auth/me').flush({...user,access_mode:'provider',repositories:[]});
+    expect(await done).toBeTrue();http.verify();
+  });
+});
+
+describe('Selected provider session',()=>{
+  it('hides the other provider even if a stale profile contains it',()=>{
+    TestBed.configureTestingModule({providers:[provideRouter([]),provideHttpClient()]});
+    const auth=TestBed.inject(AuthService);auth.user.set({...user,active_provider:'github',enabled_providers:['github','azure-devops']});
+    expect(auth.providerEnabled('github')).toBeTrue();expect(auth.providerEnabled('azure-devops')).toBeFalse();
+  });
+  it('shows access results rather than a PAT form for an empty GitHub authorization',async()=>{
+    TestBed.configureTestingModule({providers:[provideRouter([]),provideHttpClient(),provideHttpClientTesting()]});
+    const http=TestBed.inject(HttpTestingController);
+    const done=TestBed.runInInjectionContext(()=>authGuard({} as any,{url:'/'} as any)) as Promise<any>;
+    http.expectOne('/api/auth/me').flush({...user,access_mode:'provider',active_provider:'github',repositories:[]});
+    expect((await done).toString()).toBe('/access');http.verify();
   });
 });

@@ -10,6 +10,7 @@
     <h2 id="repository-filter-title" class="sr-only">Repository</h2>
     <div class="provider-picker-row">
       <div class="segmented-control" aria-label="Provider">
+        @if (workspace.auth.providerEnabled('github')) {
         <button
           type="button"
           [class.active]="workspace.provider() === 'github'"
@@ -17,6 +18,8 @@
         >
           <app-provider-mark provider="github" /> GitHub
         </button>
+        }
+        @if (workspace.auth.providerEnabled('azure-devops')) {
         <button
           type="button"
           [class.active]="workspace.provider() === 'azure-devops'"
@@ -24,6 +27,7 @@
         >
           <app-provider-mark provider="azure-devops" /> Azure DevOps
         </button>
+        }
       </div>
 
       <button
@@ -56,12 +60,12 @@
               ? 'GitHub owner or organization'
               : 'Azure DevOps organization'
           "
-          searchPlaceholder="Search organizations…"
+          [searchPlaceholder]="workspace.provider() === 'github' ? 'Search owners…' : 'Search organizations…'"
           [searchable]="true"
           [allowCustomValue]="true"
           [loading]="workspace.organizationLoading()"
           [error]="workspace.organizationError()"
-          emptyLabel="No organizations found"
+          [emptyLabel]="workspace.provider() === 'github' ? 'No repository owners found' : 'No organizations found'"
           (valueChange)="workspace.selectOrganization($event)"
         />
       </div>

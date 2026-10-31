@@ -21,6 +21,7 @@
     <div class="topbar-actions">
       @if (!noRepositories()) {
       <div class="topbar-health" aria-label="Integration health">
+        @if (auth.providerEnabled('github')) {
         <span
           class="health-chip"
           [class.is-connected]="providerState('github') === 'connected' && providerConnected('github') === true"
@@ -33,6 +34,8 @@
           <app-provider-mark provider="github" /><span class="status-dot"></span>GitHub
           <span class="health-state">{{ healthState('github') }}</span>
         </span>
+        }
+        @if (auth.providerEnabled('azure-devops')) {
         <span
           class="health-chip"
           [class.is-connected]="providerState('azure-devops') === 'connected' && providerConnected('azure-devops') === true"
@@ -45,6 +48,7 @@
           <app-provider-mark provider="azure-devops" /><span class="status-dot"></span>Azure
           <span class="health-state">{{ healthState('azure-devops') }}</span>
         </span>
+        }
         <span class="health-chip" [class.is-connected]="health()?.ollama?.ready === true" [class.is-checking]="!health() || health()?.ollama?.ready === null" [class.is-offline]="health()?.ollama?.ready === false">
           <app-provider-mark provider="ollama" /><span class="status-dot"></span>Ollama
           <span class="health-state">{{ healthState('ollama') }}</span>
@@ -65,18 +69,22 @@
         @if (mobileHealthOpen()) {
           <div class="mobile-health-popover" aria-label="Integration health details">
             <strong>Integration health</strong>
+            @if (auth.providerEnabled('github')) {
             <span
               [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
               [attr.title]="providerDetail('github')"
               ><app-provider-mark provider="github" />GitHub
               <em>{{ healthState('github') }}</em></span
             >
+            }
+            @if (auth.providerEnabled('azure-devops')) {
             <span
               [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
               [attr.title]="providerDetail('azure-devops')"
               ><app-provider-mark provider="azure-devops" />Azure DevOps
               <em>{{ healthState('azure-devops') }}</em></span
             >
+            }
             <span [class.is-offline]="health()?.ollama?.ready === false"
               ><app-provider-mark provider="ollama" />Ollama <em>{{ healthState('ollama') }}</em></span
             >
@@ -161,16 +169,6 @@
 
   <main id="main-content" class="main-content" appRevealSections>
     @if(auth.message()){<div class="inline-alert warning-alert" role="alert">{{auth.message()}}<button class="icon-button" type="button" aria-label="Dismiss message" (click)="auth.message.set('')"><app-icon name="x" /></button></div>}
-    @if (noRepositories()) {
-      <section class="card repository-access-message" aria-labelledby="repository-access-heading">
-        <h2 id="repository-access-heading">No repositories assigned</h2>
-        <p>You are signed in, but your administrator has not assigned repository access.</p>
-        <p>Account ID: <code>{{ auth.user()?.id }}</code></p>
-        <button class="button secondary" type="button" (click)="copyAccountId()">Copy Account ID</button>
-        <p class="copy-status" role="status">{{ copyStatus() }}</p>
-      </section>
-    } @else {
-      <router-outlet />
-    }
+    <router-outlet />
   </main>
 </div>

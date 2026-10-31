@@ -1,6 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { catchError, finalize, forkJoin, of } from 'rxjs';
 
+import { AuthService } from './auth.service';
 import { ReviewerApi } from './api.service';
 import {
   OrganizationSummary,
@@ -13,6 +14,7 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceService {
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
 
   readonly provider = signal<ProviderId>('github');
@@ -61,6 +63,23 @@ export class WorkspaceService {
 
   constructor() {
     this.restore();
+    const accessible = [...new Set(this.auth.user()?.repositories.map(r=>r.provider) ?? [])];
+    if (!this.auth.providerEnabled(this.provider()) || (accessible.length > 0 && !accessible.includes(this.provider()))) {
+      this.provider.set((accessible[0] as ProviderId | undefined) ?? (this.auth.providerEnabled('github') ? 'github' : 'azure-devops'));
+      this.organization.set(''); this.project.set(''); this.repositoryName.set('');
+    }
+    const active=this.auth.user()?.active_provider;
+    if (active === 'github' || active === 'azure-devops') {
+      this.provider.set(active);
+      const accessible=this.auth.user()?.repositories.filter(r=>r.provider === active) ?? [];
+      if (!accessible.some(r=>r.repository.toLowerCase() === this.repository().toLowerCase())) {
+        const first=accessible[0]?.repository.split('/') ?? [];
+        this.organization.set(first[0] ?? '');
+        this.project.set(active === 'azure-devops' ? first[1] ?? '' : '');
+        this.repositoryName.set(first[active === 'azure-devops' ? 2 : 1] ?? '');
+        this.persist();
+      }
+    }
     if (this.hasRepositorySelection()) this.refreshPullRequests();
   }
 
@@ -238,7 +257,7 @@ export class WorkspaceService {
   }
 
   setProvider(provider: ProviderId): void {
-    if (provider === this.provider()) return;
+    if (!this.auth.providerEnabled(provider) || provider === this.provider()) return;
     this.provider.set(provider);
     this.organization.set('');
     this.project.set('');
@@ -319,7 +338,7 @@ export class WorkspaceService {
   private persist(): void {
     try {
       localStorage.setItem(
-        'ipr-workspace',
+        'ipr-workspace:' + (this.auth.user()?.id ?? 'anonymous'),
         JSON.stringify({
           provider: this.provider(),
           organization: this.organization(),
@@ -334,7 +353,7 @@ export class WorkspaceService {
 
   private restore(): void {
     try {
-      const raw = localStorage.getItem('ipr-workspace');
+      const raw = localStorage.getItem('ipr-workspace:' + (this.auth.user()?.id ?? 'anonymous'));
       if (!raw) return;
       const value = JSON.parse(raw) as Partial<{
         provider: ProviderId;

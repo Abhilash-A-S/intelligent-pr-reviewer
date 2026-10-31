@@ -5732,3 +5732,16 @@ select:focus-visible {
 @include meta.load-css("./reference-pages");
 
 @include meta.load-css("./approved-design");
+
+/* One foreground overlay; background polling remains interactive. */
+.request-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(3px); cursor: wait; touch-action: none;
+}
+ngx-spinner .ngx-spinner-overlay { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  ngx-spinner .la-ball-clip-rotate-pulse > div { animation: none !important; }
+  ngx-spinner .la-ball-clip-rotate-pulse > div:first-child { transform: translate(-50%, -50%); }
+  ngx-spinner .la-ball-clip-rotate-pulse > div:last-child { transform: translate(-50%, -50%); }
+}

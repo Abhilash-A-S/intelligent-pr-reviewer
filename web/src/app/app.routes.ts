@@ -11,6 +11,8 @@ export const routes: Routes = [
     canActivate: [authGuard],
     canActivateChild: [authGuard],
     children: [
+      {path:'access',title:'Repository access · Intelligent PR Reviewer',loadComponent:()=>import('./pages/no-access/no-access').then(m=>m.NoAccessPage)},
+      {path:'connections',redirectTo:'',pathMatch:'full'},
       {
         path: '',
         title: 'Dashboard · Intelligent PR Reviewer',

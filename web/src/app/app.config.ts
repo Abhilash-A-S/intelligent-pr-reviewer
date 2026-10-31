@@ -85,13 +85,16 @@ import {
 } from '@lucide/angular';
 
 import { authInterceptor } from './core/auth.service';
+import { loadingInterceptor } from './core/loading.service';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
-    provideHttpClient(withFetch(), withInterceptors([authInterceptor])),
+    provideHttpClient(withFetch(), withInterceptors([loadingInterceptor, authInterceptor])),
+    provideAnimationsAsync(),
     provideRouter(routes),
     provideLucideConfig({ size: 18, strokeWidth: 1.8 }),
     provideLucideIcons(

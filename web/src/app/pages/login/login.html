@@ -1,11 +1,22 @@
 <div class="login-page">
   <header class="login-header"><a class="login-brand" href="/login"><span><app-icon name="git-branch" /></span>Intelligent PR Reviewer</a><button class="icon-button" type="button" (click)="theme.toggle()" [attr.aria-label]="theme.mode() === 'dark' ? 'Use light theme' : 'Use dark theme'"><app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" /></button></header>
   <main class="login-main">
-    <section class="login-intro"><span class="login-eyebrow"><app-icon name="shield-check" /> Your team's review workspace</span><h1>Better reviews.<br>A shared standard.</h1><p>Review pull requests, understand findings, and publish feedback from one secure workspace.</p><div class="login-benefit"><app-icon name="git-pull-request" /><div><strong>One place for every review</strong><span>GitHub and Azure DevOps, connected to your workflow.</span></div></div><div class="login-benefit"><app-icon name="lock-keyhole" /><div><strong>Access that follows your role</strong><span>Repository and publishing permissions managed by your team.</span></div></div></section>
+    <section class="login-intro"><span class="login-eyebrow"><app-icon name="shield-check" /> Your team's review workspace</span><h1>Better reviews.<br>A shared standard.</h1><p>Review pull requests, understand findings, and publish feedback from one secure workspace.</p><div class="login-benefit"><app-icon name="git-pull-request" /><div><strong>One place for every review</strong><span>GitHub and Azure DevOps, connected to your workflow.</span></div></div><div class="login-benefit"><app-icon name="lock-keyhole" /><div><strong>Access that follows your role</strong><span>Repository access follows your organization permissions.</span></div></div></section>
     <section class="login-card" aria-labelledby="sign-in-title"><span class="login-symbol"><app-icon name="git-branch" /></span><h2 id="sign-in-title">Welcome to your workspace</h2><p>Sign in with your organization account to continue.</p>
       @if(error()){<div class="login-alert" role="alert"><app-icon name="info" /><span>{{error()}}</span></div>}
-      <button class="button primary login-submit" type="button" [disabled]="loading() || !ready() || starting()" (click)="signIn()"><app-icon [name]="starting() ? 'loader-circle' : 'shield-check'" />{{ loading() ? 'Checking sign-in…' : starting() ? 'Redirecting…' : 'Sign in with ' + provider() }}</button>
-      <div class="login-trust"><app-icon name="lock-keyhole" /><span>Your organization handles your credentials. Repository access is assigned by your administrator.</span></div>
+      <div class="login-options" aria-label="Sign-in options">
+        @if (microsoftEnabled()) {<div>
+          <button class="button secondary login-submit microsoft-login" type="button" [disabled]="!microsoftReady()" (click)="signIn('microsoft')"><svg class="microsoft-mark" viewBox="0 0 21 21" aria-hidden="true"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg><span>Sign in with Microsoft</span></button>
+          <p class="login-provider-note">Azure DevOps repositories</p>
+          @if (!loading() && !microsoftReady()) {<p class="login-setup-note">Microsoft sign-in is not configured for this application.</p>}
+        </div>}
+        @if (githubEnabled()) {<div>
+          <button class="button secondary login-submit github-login" type="button" [disabled]="!githubReady()" (click)="signIn('github')"><app-provider-mark provider="github"/><span>Sign in with GitHub</span></button>
+          <p class="login-provider-note">GitHub repositories</p>
+          @if (!loading() && !githubReady()) {<p class="login-setup-note">GitHub sign-in is not configured for this application.</p>}
+        </div>}
+      </div>
+      <div class="login-trust"><app-icon name="lock-keyhole" /><span>Your organization handles your credentials. Your provider verifies your identity and repository access.</span></div>
     </section>
   </main><footer>Intelligent PR Reviewer · Team workspace</footer>
 </div>

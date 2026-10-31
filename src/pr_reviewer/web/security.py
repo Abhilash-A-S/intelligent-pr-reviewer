@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import base64
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -24,6 +25,79 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 ROLES = {"viewer": 1, "reviewer": 2, "publisher": 3, "administrator": 4}
+
+
+def log_sign_in_failure(provider, stage, exc, request=None):
+    """Log only diagnostic categories; never exception text or OAuth payloads."""
+    status = "-"
+    details = {}
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = str(exc.response.status_code)
+        try:
+            if len(exc.response.content) <= 65536:
+                value = exc.response.json()
+                if isinstance(value, dict):
+                    details = value
+        except (ValueError, UnicodeError):
+            pass
+    if request is not None and request.query_params.get("error"):
+        details = {
+            "error": request.query_params.get("error"),
+            "error_description": request.query_params.get("error_description", "")[
+                :4096
+            ],
+        }
+    known_errors = {
+        "access_denied",
+        "invalid_client",
+        "invalid_grant",
+        "invalid_scope",
+        "unauthorized_client",
+        "invalid_request",
+        "interaction_required",
+        "consent_required",
+        "login_required",
+        "temporarily_unavailable",
+        "server_error",
+        "redirect_uri_mismatch",
+        "bad_verification_code",
+        "incorrect_client_credentials",
+    }
+    error = details.get("error")
+    error = error if isinstance(error, str) and error in known_errors else "-"
+    codes = details.get("error_codes", [])
+    codes = codes if isinstance(codes, list) else []
+    codes = [str(v) for v in codes[:8] if type(v) is int and 0 <= v <= 999999999]
+    description = details.get("error_description")
+    if isinstance(description, str):
+        codes.extend(re.findall(r"\bAADSTS([0-9]{1,9})\b", description[:4096])[:8])
+    missing = "-"
+    if (
+        isinstance(exc, KeyError)
+        and exc.args
+        and isinstance(exc.args[0], str)
+        and exc.args[0]
+        in {
+            "code",
+            "id_token",
+            "access_token",
+            "expires_in",
+            "sub",
+            "exp",
+        }
+    ):
+        missing = exc.args[0]
+    logging.getLogger("uvicorn.error").warning(
+        "Sign-in failed: provider=%s stage=%s category=%s http_status=%s "
+        "oauth_error=%s provider_codes=%s missing_field=%s",
+        provider,
+        stage,
+        type(exc).__name__,
+        status,
+        error,
+        ",".join(dict.fromkeys(codes)) or "-",
+        missing,
+    )
 
 
 def canonical_repository(provider: str, repository: str) -> str:
@@ -69,6 +143,7 @@ class Principal:
     id: str
     name: str
     groups: tuple[str, ...] = ()
+    provider: str = ""
 
 
 class AccessPolicy:
@@ -144,6 +219,9 @@ class AuthSettings:
     policy_file: str = ""
     database: str = "data/auth.sqlite3"
     label: str = "Microsoft"
+    access_mode: str = "policy"
+    github_client_id: str = ""
+    github_client_secret: str = ""
 
     @classmethod
     def from_env(cls):
@@ -151,8 +229,9 @@ class AuthSettings:
         issuer = os.getenv("PR_REVIEW_OIDC_ISSUER", "").strip().rstrip("/")
         if not issuer and tenant:
             if not re.fullmatch(r"[0-9a-fA-F-]{36}", tenant):
-                return cls()  # No broad common/organizations tenant fallback.
-            issuer = f"https://login.microsoftonline.com/{tenant}/v2.0"
+                tenant = ""  # No broad common/organizations tenant fallback.
+            if tenant:
+                issuer = f"https://login.microsoftonline.com/{tenant}/v2.0"
         return cls(
             issuer,
             os.getenv("PR_REVIEW_OIDC_CLIENT_ID", ""),
@@ -161,11 +240,20 @@ class AuthSettings:
             os.getenv("PR_REVIEW_ACCESS_POLICY", ""),
             os.getenv("PR_REVIEW_AUTH_DB", "data/auth.sqlite3"),
             os.getenv("PR_REVIEW_SIGN_IN_LABEL", "Microsoft"),
+            os.getenv("PR_REVIEW_ACCESS_MODE", "provider"),
+            os.getenv("PR_REVIEW_GITHUB_CLIENT_ID", ""),
+            os.getenv("PR_REVIEW_GITHUB_CLIENT_SECRET", ""),
         )
 
     @property
     def secure(self):
         return self.public_url.startswith("https://")
+
+    @property
+    def microsoft_configured(self):
+        return bool(
+            self.issuer.startswith("https://") and self.client_id and self.client_secret
+        )
 
     @property
     def configured(self):
@@ -174,10 +262,16 @@ class AuthSettings:
             parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
         )
         return bool(
-            self.issuer.startswith("https://")
-            and self.client_id
-            and self.client_secret
-            and self.policy_file
+            (
+                self.microsoft_configured
+                or (
+                    self.access_mode == "provider"
+                    and self.github_client_id
+                    and self.github_client_secret
+                )
+            )
+            and (self.policy_file or self.access_mode == "provider")
+            and self.access_mode in {"policy", "provider"}
             and origin_valid
             and parsed.netloc
             and parsed.path in {"", "/"}
@@ -210,6 +304,36 @@ class AuthService:
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS auth_state (kind TEXT, key TEXT, payload TEXT NOT NULL, expires REAL NOT NULL, PRIMARY KEY(kind,key))"
                 )
+                if self.settings.access_mode == "provider":
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute(
+                        "CREATE TABLE IF NOT EXISTS auth_migrations (name TEXT PRIMARY KEY)"
+                    )
+                    if not db.execute(
+                        "SELECT 1 FROM auth_migrations WHERE name=?",
+                        ("organizational-login-v2",),
+                    ).fetchone():
+                        # Old sessions could represent both providers. Require a fresh,
+                        # provider-scoped login once; encrypted connections are retained.
+                        db.execute("DELETE FROM auth_state")
+                        db.execute(
+                            "INSERT INTO auth_migrations VALUES (?)",
+                            ("organizational-login-v2",),
+                        )
+
+        self.connections = None
+        if self.settings.access_mode == "provider" and self.settings.configured:
+            from pr_reviewer.web.provider_access import ProviderAccess
+
+            self.connections = ProviderAccess(self)
+            self.policy = self.connections
+
+    def adapter(self, user, provider, repository=None):
+        if self.connections is not None:
+            return self.connections.adapter(user, provider, repository)
+        from pr_reviewer.providers.factory import create_pull_request_provider
+
+        return create_pull_request_provider(provider)
 
     def _db(self):
         return sqlite3.connect(
@@ -253,7 +377,7 @@ class AuthService:
     def current(self, request: Request) -> Principal:
         if not self.settings.configured:
             raise HTTPException(
-                503, "Sign-in is not configured. Contact your administrator."
+                503, "Company sign-in is not configured. Contact your administrator."
             )
         try:
             session = self._load("session", request.cookies.get(self.SESSION, ""))
@@ -269,15 +393,35 @@ class AuthService:
             csrf = request.headers.get("x-csrf-token", "")
             if not secrets.compare_digest(csrf.encode(), session["csrf"].encode()):
                 raise HTTPException(403, "Request verification failed")
-        return Principal(session["id"], session["name"], tuple(session["groups"]))
+        return Principal(
+            session["id"],
+            session["name"],
+            tuple(session["groups"]),
+            session.get("provider", ""),
+        )
 
     def profile(self, request):
         user = self.current(request)
-        allowed = self.policy.permissions(user)
+        access_error = ""
+        try:
+            allowed = self.policy.permissions(user)
+        except HTTPException as exc:
+            if not self.connections:
+                raise
+            allowed = {}
+            access_error = exc.detail
         return {
+            "active_provider": user.provider or None,
+            "connection_fallback": False,
+            "access_error": access_error,
             "id": user.id,
             "name": user.name,
             "csrf_token": request.state.session["csrf"],
+            "access_mode": self.settings.access_mode,
+            "enabled_providers": list(self.connections.providers(user))
+            if self.connections
+            else ["github", "azure-devops"],
+            "connections": self.connections.status(user) if self.connections else [],
             "repositories": [
                 {
                     "provider": p,
@@ -342,34 +486,121 @@ class AuthService:
             raise ValueError("Invalid groups")
         return claims
 
+    def finish_login(self, request, payload, expires):
+        previous = request.cookies.get(self.SESSION, "")
+        if previous:
+            self._load("session", previous, consume=True)
+        session = secrets.token_urlsafe(48)
+        payload["csrf"] = secrets.token_urlsafe(48)
+        self._save("session", session, payload, expires)
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            self.SESSION,
+            session,
+            max_age=max(1, int(expires - time.time())),
+            httponly=True,
+            secure=self.settings.secure,
+            samesite="lax",
+            path="/",
+        )
+        response.delete_cookie(self.LOGIN, path="/api/auth")
+        return response
+
+    def login_transaction(self, request, provider):
+        transaction = self._load(
+            "login", request.query_params.get("state", ""), consume=True
+        )
+        binding = request.cookies.get(self.LOGIN, "")
+        if (
+            not transaction
+            or transaction.get("provider", "microsoft") != provider
+            or not binding
+            or not secrets.compare_digest(transaction["binding"], self._digest(binding))
+        ):
+            raise ValueError("Invalid sign-in state")
+        if not request.query_params.get("code") or request.query_params.get("error"):
+            raise ValueError("Authorization declined")
+        return transaction
+
+    def login_failure(self):
+        response = RedirectResponse("/login?error=sign_in_failed", status_code=303)
+        response.delete_cookie(self.LOGIN, path="/api/auth")
+        return response
+
     def mount(self, app):
+        if self.connections:
+            self.connections.mount(app)
+
         @app.get("/api/auth/config")
         def config():
             ready = bool(self.settings.configured)
             if ready:
                 try:
-                    self.policy.permissions(Principal("__configuration_probe__", ""))
+                    if self.connections:
+                        self.connections.ready()
+                    else:
+                        self.policy.permissions(
+                            Principal("__configuration_probe__", "")
+                        )
                 except HTTPException:
                     ready = False
-            return {"configured": ready, "provider_label": self.settings.label}
+            return {
+                "configured": ready,
+                "enabled_providers": list(self.connections.enabled)
+                if self.connections else ["azure-devops"],
+                "provider_label": self.settings.label,
+                "microsoft_configured": ready
+                and self.settings.microsoft_configured
+                and (
+                    not self.connections or "azure-devops" in self.connections.enabled
+                ),
+                "github_configured": ready
+                and bool(
+                    self.connections
+                    and self.connections.github_id
+                    and self.connections.github_secret
+                    and "github" in self.connections.enabled
+                ),
+                "microsoft_repository_auth": self.connections.microsoft_mode
+                if self.connections
+                else "policy",
+            }
 
         @app.get("/api/auth/me")
         def me(request: Request):
             return self.profile(request)
 
         @app.get("/api/auth/login")
-        def login():
+        def login(provider: str = "microsoft"):
+            if provider not in {"microsoft", "github"}:
+                raise HTTPException(400, "Unsupported sign-in provider")
             if not self.settings.configured:
                 raise HTTPException(503, "Sign-in is not configured")
+            if provider == "github":
+                if not self.connections or not (
+                    self.connections.github_id and self.connections.github_secret
+                ):
+                    raise HTTPException(503, "GitHub sign-in is not configured")
+                self.connections._check("github")
+            elif not self.settings.microsoft_configured:
+                raise HTTPException(503, "Microsoft sign-in is not configured")
+            elif self.connections:
+                self.connections._check("azure-devops")
+            stage = "connection_configuration"
             try:
-                data = self.metadata()
+                if self.connections:
+                    self.connections.ready()
                 state, nonce, verifier, binding = [
                     secrets.token_urlsafe(48) for _ in range(4)
                 ]
+                delegated = bool(provider == "microsoft" and self.connections)
+                stage = "login_transaction_storage"
                 self._save(
                     "login",
                     state,
                     {
+                        "provider": provider,
+                        "delegated": delegated,
                         "nonce": nonce,
                         "verifier": verifier,
                         "binding": self._digest(binding),
@@ -381,21 +612,37 @@ class AuthService:
                     .rstrip(b"=")
                     .decode()
                 )
-                query = urlencode(
-                    {
-                        "client_id": self.settings.client_id,
-                        "response_type": "code",
-                        "response_mode": "query",
-                        "redirect_uri": self.settings.public_url + "/api/auth/callback",
-                        "scope": "openid profile",
-                        "state": state,
-                        "nonce": nonce,
-                        "code_challenge": challenge,
-                        "code_challenge_method": "S256",
-                    }
+                callback = (
+                    "/api/auth/github/callback"
+                    if provider == "github"
+                    else "/api/auth/callback"
                 )
+                query = {
+                    "client_id": self.connections.github_id
+                    if provider == "github"
+                    else self.settings.client_id,
+                    "redirect_uri": self.settings.public_url + callback,
+                    "state": state,
+                    "code_challenge": challenge,
+                    "code_challenge_method": "S256",
+                }
+                if provider == "github":
+                    query.update(scope="repo read:user", allow_signup="false")
+                    endpoint = "https://github.com/login/oauth/authorize"
+                else:
+                    from .provider_access import AZURE_SCOPE
+
+                    query.update(
+                        response_type="code",
+                        response_mode="query",
+                        scope="openid profile"
+                        + (" " + AZURE_SCOPE if delegated else ""),
+                        nonce=nonce,
+                    )
+                    stage = "identity_discovery"
+                    endpoint = self.metadata()["authorization_endpoint"]
                 response = RedirectResponse(
-                    data["authorization_endpoint"] + "?" + query, status_code=302
+                    endpoint + "?" + urlencode(query), status_code=302
                 )
                 response.set_cookie(
                     self.LOGIN,
@@ -407,34 +654,24 @@ class AuthService:
                     path="/api/auth",
                 )
                 return response
-            except Exception:
+            except Exception as exc:
+                log_sign_in_failure(provider, stage, exc)
                 raise HTTPException(503, "Identity service is unavailable") from None
 
         @app.get("/api/auth/callback")
         def callback(request: Request):
-            if not self.settings.configured:
+            if not self.settings.configured or not self.settings.microsoft_configured:
                 raise HTTPException(503, "Sign-in is not configured")
+            stage = "callback_validation"
             try:
-                state = request.query_params.get("state", "")
-                transaction = self._load("login", state, consume=True)
-                binding = request.cookies.get(self.LOGIN, "")
-                if (
-                    not transaction
-                    or not binding
-                    or not secrets.compare_digest(
-                        transaction["binding"], self._digest(binding)
-                    )
-                ):
-                    raise ValueError("Invalid sign-in state")
-                code = request.query_params.get("code", "")
-                if not code or request.query_params.get("error"):
-                    raise ValueError("Authorization declined")
+                transaction = self.login_transaction(request, "microsoft")
+                stage = "token_exchange"
                 with httpx.Client(timeout=10) as client:
                     result = client.post(
                         self.metadata()["token_endpoint"],
                         data={
                             "grant_type": "authorization_code",
-                            "code": code,
+                            "code": request.query_params["code"],
                             "redirect_uri": self.settings.public_url
                             + "/api/auth/callback",
                             "client_id": self.settings.client_id,
@@ -444,38 +681,132 @@ class AuthService:
                     )
                     result.raise_for_status()
                     tokens = result.json()
+                stage = "id_token_validation"
                 claims = self.verify_id_token(tokens["id_token"], transaction["nonce"])
-                session = secrets.token_urlsafe(48)
                 payload = {
                     "id": self.settings.issuer + "|" + claims["sub"],
                     "name": str(claims.get("name") or "Team member")[:200],
                     "groups": claims.get("groups", []),
-                    "csrf": secrets.token_urlsafe(48),
                 }
-                # Rotate any prior application session. ID/access tokens are never persisted.
-                previous = request.cookies.get(self.SESSION, "")
-                if previous:
-                    self._load("session", previous, consume=True)
-                expires = min(float(claims["exp"]), time.time() + 8 * 3600)
-                self._save("session", session, payload, expires)
-                response = RedirectResponse("/", status_code=303)
-                response.set_cookie(
-                    self.SESSION,
-                    session,
-                    max_age=max(1, int(expires - time.time())),
-                    httponly=True,
-                    secure=self.settings.secure,
-                    samesite="lax",
-                    path="/",
+                if self.connections:
+                    stage = "azure_delegated_token"
+                    if not transaction.get("delegated"):
+                        raise ValueError(
+                            "Organizational sign-in requires delegated authorization"
+                        )
+                    self.connections._check("azure-devops")
+                    payload["provider"] = "azure-devops"
+                    if transaction.get("delegated"):
+                        token = tokens["access_token"]
+                        if (
+                            not isinstance(token, str)
+                            or not token
+                            or tokens.get("token_type", "").casefold() != "bearer"
+                        ):
+                            raise ValueError("Missing Azure delegated token")
+                        expires = time.time() + min(
+                            float(tokens["expires_in"]), 30 * 86400
+                        )
+                        if expires <= time.time():
+                            raise ValueError("Expired delegated token")
+                        stage = "credential_storage"
+                        self.connections._save(
+                            Principal(
+                                payload["id"], payload["name"], provider="azure-devops"
+                            ),
+                            "azure-devops",
+                            "",
+                            token,
+                            "entra:" + str(claims.get("oid") or claims["sub"]),
+                            expires,
+                            replace_all=True,
+                        )
+                stage = "session_storage"
+                return self.finish_login(
+                    request, payload, min(float(claims["exp"]), time.time() + 8 * 3600)
                 )
-                response.delete_cookie(self.LOGIN, path="/api/auth")
-                return response
-            except Exception:
-                response = RedirectResponse(
-                    "/login?error=sign_in_failed", status_code=303
+            except Exception as exc:
+                log_sign_in_failure("microsoft", stage, exc, request)
+                return self.login_failure()
+
+        @app.get("/api/auth/github/callback")
+        def github_callback(request: Request):
+            if not self.settings.configured or not self.connections:
+                raise HTTPException(503, "GitHub sign-in is not configured")
+            stage = "callback_validation"
+            try:
+                self.connections._check("github")
+                transaction = self.login_transaction(request, "github")
+                stage = "token_exchange"
+                with httpx.Client(timeout=15, follow_redirects=False) as client:
+                    result = client.post(
+                        "https://github.com/login/oauth/access_token",
+                        headers={"Accept": "application/json"},
+                        data={
+                            "client_id": self.connections.github_id,
+                            "client_secret": self.connections.github_secret,
+                            "redirect_uri": self.settings.public_url
+                            + "/api/auth/github/callback",
+                            "code": request.query_params["code"],
+                            "code_verifier": transaction["verifier"],
+                        },
+                    )
+                    result.raise_for_status()
+                    tokens = result.json()
+                    token = tokens["access_token"]
+                    if (
+                        not isinstance(token, str)
+                        or not token
+                        or tokens.get("token_type", "").casefold() != "bearer"
+                    ):
+                        raise ValueError("Invalid GitHub token")
+                    stage = "github_identity"
+                    identity = self.connections.fetch(
+                        client,
+                        "https://api.github.com/user",
+                        headers={"Authorization": "Bearer " + token},
+                    ).json()
+                if (
+                    type(identity.get("id")) is not int
+                    or identity["id"] <= 0
+                    or not identity.get("login")
+                ):
+                    raise ValueError("Missing GitHub user identity")
+                user = Principal(
+                    "https://github.com|" + str(identity["id"]),
+                    str(identity.get("name") or identity["login"])[:200],
+                    provider="github",
                 )
-                response.delete_cookie(self.LOGIN, path="/api/auth")
-                return response
+                expires = time.time() + min(
+                    float(tokens.get("expires_in", 30 * 86400)), 30 * 86400
+                )
+                if expires <= time.time():
+                    raise ValueError("Expired GitHub token")
+                scopes = set(str(tokens.get("scope", "")).replace(",", " ").split())
+                stage = "credential_storage"
+                self.connections._save(
+                    user,
+                    "github",
+                    "",
+                    token,
+                    "github:" + str(identity["id"]),
+                    expires,
+                    bool(scopes.intersection({"repo", "public_repo"})),
+                )
+                stage = "session_storage"
+                return self.finish_login(
+                    request,
+                    {
+                        "id": user.id,
+                        "name": user.name,
+                        "groups": [],
+                        "provider": "github",
+                    },
+                    min(expires, time.time() + 8 * 3600),
+                )
+            except Exception as exc:
+                log_sign_in_failure("github", stage, exc, request)
+                return self.login_failure()
 
         @app.post("/api/auth/logout")
         def logout(request: Request):

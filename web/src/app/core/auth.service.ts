@@ -4,17 +4,24 @@ import { CanActivateFn, Router } from '@angular/router';
 import { catchError, firstValueFrom, throwError } from 'rxjs';
 
 export interface RepositoryAccess { provider: string; repository: string; role: string; can_review: boolean; can_publish: boolean; can_admin: boolean; }
-export interface SignedInUser { id: string; name: string; csrf_token: string; repositories: RepositoryAccess[]; }
+export interface ConnectionStatus { id:string; organization:string; identity:string; connected:boolean; configured:boolean; state:string; detail:string; github_oauth_ready:boolean; }
+export interface SignedInUser { active_provider?:string|null; connection_fallback?:boolean; access_error?:string; access_mode?:string; enabled_providers?:string[]; connections?:ConnectionStatus[];  id: string; name: string; csrf_token: string; repositories: RepositoryAccess[]; }
 @Injectable({providedIn:'root'})
 export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   readonly user = signal<SignedInUser | null>(null);
   readonly message = signal('');
-  async restore(): Promise<boolean> {
+  private restoring?: Promise<boolean>;
+  restore(): Promise<boolean> {
+    if (!this.restoring) this.restoring = this.loadUser().finally(() => { this.restoring = undefined; });
+    return this.restoring;
+  }
+  private async loadUser(): Promise<boolean> {
     try { this.user.set(await firstValueFrom(this.http.get<SignedInUser>('/api/auth/me'))); return true; }
     catch { this.user.set(null); return false; }
   }
+  providerEnabled(provider:string):boolean { const user=this.user(); return (!user?.active_provider || user.active_provider === provider) && (user?.enabled_providers?.includes(provider) ?? true); }
   access(provider: string, repository: string): RepositoryAccess | undefined {
     return this.user()?.repositories.find(r => r.provider === provider && r.repository.toLowerCase() === repository.toLowerCase());
   }
@@ -31,9 +38,15 @@ export class AuthService {
     this.user.set(null); this.message.set(''); void this.router.navigateByUrl('/login');
   }
 }
-export const authGuard: CanActivateFn = async () => {
+export const authGuard: CanActivateFn = async (_route,state) => {
   const auth = inject(AuthService), router = inject(Router);
-  return await auth.restore() ? true : router.createUrlTree(['/login']);
+  if (!await auth.restore()) return router.createUrlTree(['/login']);
+  const path = (state?.url ?? '/').split('?')[0];
+  if (auth.user()?.repositories.length === 0) {
+    const target='/access';
+    return path === target ? true : router.createUrlTree([target]);
+  }
+  return path === '/access' ? router.createUrlTree(['/']) : true;
 };
 export const authInterceptor: HttpInterceptorFn = (request,next) => {
   const auth = inject(AuthService);
@@ -42,7 +55,7 @@ export const authInterceptor: HttpInterceptorFn = (request,next) => {
   const headers: Record<string,string> = unsafe && auth.user() ? {'X-CSRF-Token': auth.user()!.csrf_token} : {};
   return next(request.clone({setHeaders:headers})).pipe(catchError((error:HttpErrorResponse) => {
     if (error.status === 401 && !request.url.startsWith('/api/auth/')) auth.expire();
-    if (error.status === 403) auth.message.set('Access denied. Your account is not permitted to perform this action.');
+    if (error.status === 403 && !request.url.startsWith('/api/connections')) auth.message.set('Access denied. Your account is not permitted to perform this action.');
     return throwError(()=>error);
   }));
 };

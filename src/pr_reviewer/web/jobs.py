@@ -29,6 +29,8 @@ class ReviewCommand:
     review_depth: str = "standard"
     publish: bool = False
     max_workers: int | None = None
+    owner_login_provider: str = ""
+    owner_connection_version: str | None = None
     owner_id: str | None = None
     owner_name: str | None = None
     owner_auth_expires_at: float | None = None
@@ -89,6 +91,8 @@ class ReviewJob:
 
     def snapshot(self, *, include_result: bool = True) -> dict[str, Any]:
         payload = asdict(self)
+        payload["command"].pop("owner_login_provider", None)
+        payload["command"].pop("owner_connection_version", None)
         payload["command"].pop("owner_groups", None)
         payload["command"].pop("owner_auth_expires_at", None)
         if not include_result:
@@ -138,6 +142,8 @@ class ReviewJobManager:
         orchestrator_factory: Callable[..., ReviewOrchestrator] = ReviewOrchestrator,
         max_parallel_jobs: int | None = None,
         execution_guard: Callable[[ReviewCommand], None] | None = None,
+        command_provider_factory: Callable[[ReviewCommand], PullRequestProvider]
+        | None = None,
     ) -> None:
         configured = max_parallel_jobs
         if configured is None:
@@ -149,6 +155,7 @@ class ReviewJobManager:
             max_workers=max(1, min(configured, 4)),
             thread_name_prefix="pr-review",
         )
+        self._command_provider_factory = command_provider_factory
         self._execution_guard = execution_guard
         self._provider_factory = provider_factory
         self._llm_factory = llm_factory
@@ -253,7 +260,11 @@ class ReviewJobManager:
         try:
             if self._execution_guard is not None:
                 self._execution_guard(command)
-            provider = self._provider_factory(command.provider)
+            provider = (
+                self._command_provider_factory(command)
+                if self._command_provider_factory
+                else self._provider_factory(command.provider)
+            )
             if self._execution_guard is not None:
                 provider = AuthorizedProvider(
                     provider, lambda: self._execution_guard(command)

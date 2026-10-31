@@ -159,7 +159,7 @@ export class ReviewProgressPage {
     }
     timer(0, 1500)
       .pipe(
-        switchMap(() => this.api.getReview(this.jobId)),
+        switchMap(() => this.api.getReview(this.jobId, true, !!this.job())),
         tap((job) => {
           this.job.set(job);
           this.loading.set(false);

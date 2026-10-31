@@ -37,9 +37,7 @@ describe('AppShell PR navigation and health', () => {
     fixture.componentInstance.currentPath.set('/history');
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('h2')?.textContent).toBe('No repositories assigned');
-    expect(element.querySelector('code')?.textContent).toBe(auth.user()!.id);
-    expect(element.querySelector('router-outlet')).toBeNull();
+    expect(element.querySelector('router-outlet')).not.toBeNull();
     expect(element.querySelector('.sidebar')).toBeNull();
     expect(element.querySelector('.mobile-menu-button')).toBeNull();
     expect(element.querySelector('.health-chip')).toBeNull();
@@ -52,6 +50,12 @@ describe('AppShell PR navigation and health', () => {
     expect(element.querySelector('.repository-access-message')).toBeNull();
     expect(element.querySelector('.sidebar')).not.toBeNull();
     expect(element.querySelector('router-outlet')).not.toBeNull();
+  });
+
+  it('does not expose the retired connection page in provider navigation', () => {
+    TestBed.inject(AuthService).user.set({id:'issuer|alice',name:'Alice',csrf_token:'test',access_mode:'provider',repositories:[{provider:'github',repository:'acme/store',role:'reviewer',can_review:true,can_publish:false,can_admin:false}]});
+    const fixture=TestBed.createComponent(AppShell);fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('a[href="/connections"]')).toBeNull();
   });
 
 });

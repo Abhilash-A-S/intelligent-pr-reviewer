@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, sig
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
+import { AuthService } from '../../core/auth.service';
 import { ReviewerApi } from '../../core/api.service';
 import { ReviewJob } from '../../core/models';
 import { Pagination } from '../../shared/pagination';
@@ -33,6 +34,7 @@ interface HistoryRow {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HistoryPage {
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
   readonly rows = signal<HistoryRow[]>([]);
   readonly loading = signal(true);
@@ -48,11 +50,11 @@ export class HistoryPage {
     {value: 'all', label: 'All repositories'},
     ...[...new Set(this.rows().filter(r => this.provider() === 'all' || r.provider === this.provider()).map(r => r.repositoryKey))].sort().map(value => ({value, label: value})),
   ]);
-  readonly providerOptions: SmartSelectOption[] = [
+  readonly providerOptions = computed<SmartSelectOption[]>(() => [
     { value: 'all', label: 'All providers' },
     { value: 'github', label: 'GitHub' },
     { value: 'azure-devops', label: 'Azure DevOps' },
-  ];
+  ].filter(option => option.value === 'all' || this.auth.providerEnabled(option.value)));
   readonly decisionOptions: SmartSelectOption[] = [
     { value: 'all', label: 'All decisions' },
     { value: 'blocked', label: 'Block merge' },

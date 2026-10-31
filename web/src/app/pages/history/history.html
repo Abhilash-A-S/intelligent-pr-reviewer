@@ -62,7 +62,7 @@
         (ngModelChange)="search.set($event)"
     /></label>
     <app-smart-select
-      [options]="providerOptions"
+      [options]="providerOptions()"
       [value]="provider()"
       ariaLabel="Filter by provider"
       (valueChange)="setProviderFilter($event)"

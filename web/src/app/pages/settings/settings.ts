@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { AuthService } from '../../core/auth.service';
 import { ReviewerApi } from '../../core/api.service';
 import { HealthResponse, ReviewDepth } from '../../core/models';
 import { ReviewPreferencesService } from '../../core/review-preferences.service';
@@ -16,6 +17,7 @@ type SettingsTab = 'integrations' | 'review' | 'performance' | 'publishing';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SettingsPage {
+  readonly auth = inject(AuthService);
   private readonly api = inject(ReviewerApi);
   readonly preferences = inject(ReviewPreferencesService);
   readonly activeTab = signal<SettingsTab>('integrations');

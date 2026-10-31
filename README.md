@@ -39,7 +39,7 @@ shows an intentional empty state instead of sample content.
 
 ## Shared-team authentication
 
-The web application now requires configured company sign-in and explicit repository grants. Follow [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md) before using the UI/API. Provider tokens alone do not sign users in. Keep the policy and SQLite session database outside source control. Job/history persistence remains a separate next stage.
+The web application uses organizational Microsoft/GitHub sign-in and provider-derived repository permissions. Follow [ORGANIZATIONAL_SIGN_IN.md](ORGANIZATIONAL_SIGN_IN.md) for company registration and consent setup. Employees do not enter PATs or receive manual application repository grants. Keep application secrets, encryption keys and the SQLite database outside source control. Job/history persistence remains a separate next stage.
 
 ## First-time setup
 
@@ -120,3 +120,7 @@ uv run intelligent-pr-reviewer `
 Use `--publish` only after checking the dry-run findings. Re-running publish is
 safe: finding markers prevent duplicate inline comments and the summary is
 updated instead of duplicated.
+
+## Per-user provider connections
+
+See [ORGANIZATIONAL_SIGN_IN.md](ORGANIZATIONAL_SIGN_IN.md) for Microsoft delegated Azure DevOps authorization and organization-approved GitHub OAuth, company restrictions, provider-derived access and the live verification checklist.

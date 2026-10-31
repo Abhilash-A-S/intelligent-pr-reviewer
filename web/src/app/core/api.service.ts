@@ -1,6 +1,7 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
+import { BACKGROUND_REQUEST } from './loading.service';
 
 import {
   ChangedFileListResponse,
@@ -22,9 +23,10 @@ export class ReviewerApi {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = '/api';
 
-  health(probeOllama = true, probeProviders = true): Observable<HealthResponse> {
+  health(probeOllama = true, probeProviders = true, background = false): Observable<HealthResponse> {
     return this.http.get<HealthResponse>(`${this.baseUrl}/health`, {
       params: { probe_ollama: probeOllama, probe_providers: probeProviders },
+      context: new HttpContext().set(BACKGROUND_REQUEST, background),
     });
   }
 
@@ -109,9 +111,10 @@ export class ReviewerApi {
     return this.http.post<ReviewJob>(`${this.baseUrl}/reviews`, request);
   }
 
-  getReview(jobId: string, includeResult = true): Observable<ReviewJob> {
+  getReview(jobId: string, includeResult = true, background = false): Observable<ReviewJob> {
     return this.http.get<ReviewJob>(`${this.baseUrl}/reviews/${jobId}`, {
       params: { include_result: includeResult },
+      context: new HttpContext().set(BACKGROUND_REQUEST, background),
     });
   }
 

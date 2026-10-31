@@ -57,6 +57,11 @@
           </div>
         </div>
 
+        @if (auth.user()?.access_mode === 'provider') {
+          <p>Signed in with {{auth.user()?.active_provider === 'github' ? 'GitHub' : 'Microsoft'}}. Your organization’s authorization controls the repositories and actions available to you.</p>
+          <p>To change accounts or providers, sign out and choose a sign-in option.</p>
+          <button class="button secondary" type="button" (click)="auth.logout()">Sign out</button>
+        } @else {
         <article class="provider-settings-card">
           <header>
             <span class="integration-logo"><app-provider-mark provider="github" /></span>
@@ -144,6 +149,7 @@
             </button>
           </footer>
         </article>
+        }
       </section>
 
       <section class="card settings-panel ai-provider-panel">

@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pr_reviewer.web.security import AuthService, Principal, canonical_repository
 from fastapi.middleware.cors import CORSMiddleware
@@ -233,7 +234,7 @@ def _discovery_payload(
     query: str,
     limit: int,
 ) -> dict:
-    serialized = [asdict(item) for item in items]
+    serialized = [item if isinstance(item, dict) else asdict(item) for item in items]
     term = query.strip().casefold()
     if term:
         serialized = [
@@ -281,14 +282,43 @@ def create_app(
             raise PermissionError(
                 "Review authorization has expired; sign in and start a new review"
             )
+        if auth.connections:
+            row = auth.connections.row(
+                Principal(command.owner_id, "", provider=command.owner_login_provider),
+                command.provider,
+                command.repository,
+            )
+            if row["version"] != command.owner_connection_version:
+                raise PermissionError("Provider connection changed. Start a new review")
         auth.policy.require(
-            Principal(command.owner_id, command.owner_name or "", command.owner_groups),
+            Principal(
+                command.owner_id,
+                command.owner_name or "",
+                command.owner_groups,
+                command.owner_login_provider,
+            ),
             command.provider,
             command.repository,
             3 if command.publish else 2,
         )
 
-    manager = job_manager or ReviewJobManager(execution_guard=execution_guard)
+    def command_provider(command):
+        if auth.connections:
+            execution_guard(command)
+            return auth.adapter(
+                Principal(
+                    command.owner_id,
+                    command.owner_name or "",
+                    provider=command.owner_login_provider,
+                ),
+                command.provider,
+                command.repository,
+            )
+        return create_pull_request_provider(command.provider)
+
+    manager = job_manager or ReviewJobManager(
+        execution_guard=execution_guard, command_provider_factory=command_provider
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -303,6 +333,32 @@ def create_app(
     )
     app.state.auth = auth
     auth.mount(app)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        if request.url.path.startswith("/api/connections"):
+            return JSONResponse(
+                {"detail": "Invalid connection request"}, status_code=422
+            )
+        return JSONResponse(
+            {
+                "detail": [
+                    {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+                    for e in exc.errors()
+                ]
+            },
+            status_code=422,
+        )
+
+    def user_adapter(request, provider, repository=None):
+        if auth.connections:
+            return auth.adapter(request.state.user, provider, repository)
+        return _provider_or_http_error(provider)
+
+    def connection_status(request, probe=False):
+        if auth.connections:
+            return auth.connections.status(request.state.user)
+        return _provider_status(probe=probe)
 
     @app.middleware("http")
     async def authenticate(request: Request, call_next):
@@ -330,7 +386,12 @@ def create_app(
         return response
 
     def permissions(request):
-        return auth.policy.permissions(request.state.user)
+        # Cache only within this HTTP request, never across users or requests.
+        if not hasattr(request.state, "repository_permissions"):
+            request.state.repository_permissions = auth.policy.permissions(
+                request.state.user
+            )
+        return request.state.repository_permissions
 
     def job_permission(request, item):
         command = item.get("command") or {}
@@ -352,6 +413,7 @@ def create_app(
 
     @app.get("/api/health")
     def health(
+        http_request: Request,
         probe_ollama: bool = False,
         probe_providers: bool = False,
     ) -> dict:
@@ -362,7 +424,7 @@ def create_app(
         return {
             "status": "ok",
             "version": __version__,
-            "providers": _provider_status(probe=probe_providers),
+            "providers": connection_status(http_request, probe_providers),
             "ollama": _ollama_status(probe_ollama),
             "review_policy": {
                 "max_inline_comments": max(0, min(max_inline_comments, 200)),
@@ -373,8 +435,8 @@ def create_app(
         }
 
     @app.get("/api/providers")
-    def providers() -> dict:
-        return {"items": _provider_status()}
+    def providers(http_request: Request) -> dict:
+        return {"items": connection_status(http_request)}
 
     @app.get("/api/repository-discovery/organizations")
     def discover_organizations(
@@ -389,7 +451,17 @@ def create_app(
         }
         if not allowed:
             return _discovery_payload(provider, [], query, limit)
-        adapter = _provider_or_http_error(provider)
+        if auth.connections:
+            return _discovery_payload(
+                provider,
+                [
+                    {"id": name, "name": name, "display_name": name}
+                    for name in sorted(allowed)
+                ],
+                query,
+                limit,
+            )
+        adapter = user_adapter(http_request, provider)
         try:
             items = [
                 i for i in adapter.list_organizations() if i.name.casefold() in allowed
@@ -414,7 +486,17 @@ def create_app(
         }
         if not allowed:
             raise HTTPException(403, "Organization access denied")
-        adapter = _provider_or_http_error(provider)
+        if auth.connections:
+            return _discovery_payload(
+                provider,
+                [
+                    {"id": name, "name": name, "display_name": name}
+                    for name in sorted(allowed)
+                ],
+                query,
+                limit,
+            )
+        adapter = user_adapter(http_request, provider)
         try:
             items = [
                 i
@@ -447,7 +529,22 @@ def create_app(
         }
         if not allowed:
             raise HTTPException(403, "Repository discovery access denied")
-        adapter = _provider_or_http_error(provider)
+        if auth.connections:
+            return _discovery_payload(
+                provider,
+                [
+                    {
+                        "id": repo,
+                        "name": repo.split("/")[-1],
+                        "full_name": repo,
+                        "default_branch": None,
+                    }
+                    for repo in sorted(allowed)
+                ],
+                query,
+                limit,
+            )
+        adapter = user_adapter(http_request, provider)
         try:
             items = []
             for item in adapter.list_repositories(organization, project):
@@ -471,7 +568,7 @@ def create_app(
     ) -> dict:
         provider = normalize_provider_name(provider)
         repository = auth.policy.require(http_request.state.user, provider, repository)
-        adapter = _provider_or_http_error(provider)
+        adapter = user_adapter(http_request, provider, repository)
         try:
             items = adapter.list_pull_requests(repository, state=state)
             items = _pull_request_summaries_with_counts(
@@ -497,7 +594,7 @@ def create_app(
     ) -> dict:
         provider = normalize_provider_name(provider)
         repository = auth.policy.require(http_request.state.user, provider, repository)
-        adapter = _provider_or_http_error(provider)
+        adapter = user_adapter(http_request, provider, repository)
         try:
             item = adapter.get_pull_request(repository, pull_number)
         except Exception as exc:
@@ -513,7 +610,7 @@ def create_app(
     ) -> dict:
         provider = normalize_provider_name(provider)
         repository = auth.policy.require(http_request.state.user, provider, repository)
-        adapter = _provider_or_http_error(provider)
+        adapter = user_adapter(http_request, provider, repository)
         try:
             files = adapter.get_changed_files(repository, pull_number)
             # Azure lists metadata first; line statistics require text patches.
@@ -553,7 +650,7 @@ def create_app(
             request.repository,
             3 if request.publish else 2,
         )
-        connected = next(
+        connected = bool(auth.connections) or next(
             item["connected"] for item in _provider_status() if item["id"] == normalized
         )
         if not connected:
@@ -570,6 +667,14 @@ def create_app(
                 review_depth=request.review_depth,
                 publish=request.publish,
                 max_workers=request.max_workers,
+                owner_connection_version=(
+                    auth.connections.row(
+                        http_request.state.user, normalized, repository
+                    )["version"]
+                    if auth.connections
+                    else None
+                ),
+                owner_login_provider=http_request.state.user.provider,
                 owner_id=http_request.state.user.id,
                 owner_name=http_request.state.user.name,
                 owner_auth_expires_at=http_request.state.session["_expires_at"],
@@ -643,6 +748,8 @@ def create_app(
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def angular_app(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(404, "API endpoint not found")
         if not static_root.is_dir():
             raise HTTPException(
                 status_code=404,
