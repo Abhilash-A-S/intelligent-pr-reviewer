@@ -1305,7 +1305,7 @@
     padding: 14px 12px 40px;
 
     .progress-heading {
-      position: static !important;
+      position: sticky !important;
       top: auto;
       backdrop-filter: none;
       background: var(--surface);

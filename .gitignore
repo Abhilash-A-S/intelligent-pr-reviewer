@@ -1,7 +1,7 @@
 # Local secrets
 .env
 .env.*
-!.env.example
+.env.example
 
 # Python
 .venv/
@@ -31,3 +31,5 @@ Thumbs.db
 access-policy.json
 *.sqlite3
 *.sqlite3-*
+
+src\pr_reviewer\web\static

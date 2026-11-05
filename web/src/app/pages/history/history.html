@@ -77,7 +77,7 @@
 
   <section class="card data-card history-data-card">
     <div class="table-scroll">
-      <table class="data-table history-table">
+      <table role="table" class="data-table history-table">
         <thead>
           <tr>
             <th>Review</th>
@@ -95,47 +95,47 @@
         <tbody>
           @for (row of pagedRows(); track row.id) {
             <tr>
-              <td>
+              <td data-label="Review">
                 <span class="history-review"
                   ><strong>{{ row.title }}</strong
                   ><small>#{{ row.pullNumber }}</small></span
                 >
               </td>
-              <td>
+              <td data-label="Provider">
                 <span class="history-provider"
                   ><app-provider-mark [provider]="row.provider" />{{
                     row.provider === 'github' ? 'GitHub' : 'Azure DevOps'
                   }}</span
                 >
               </td>
-              <td>
+              <td data-label="Repository / PR">
                 <span class="repository-pr"
                   ><strong>{{ row.repository }}</strong
                   ><small>#{{ row.pullNumber }}</small></span
                 >
               </td>
-              <td>
+              <td data-label="Author">
                 <span class="author"
                   ><span class="mini-avatar">{{ initials(row.author) }}</span
                   >{{ row.author }}</span
                 >
               </td>
-              <td>
+              <td data-label="Decision">
                 <span [class]="'decision-pill ' + row.decision"
                   ><span></span>{{ decisionLabel(row.decision) }}</span
                 >
               </td>
-              <td>
+              <td data-label="Findings">
                 @if (row.severity; as counts) {
                   <span class="severity-counts" [attr.aria-label]="counts.danger + ' critical/high, ' + counts.warning + ' medium, ' + counts.info + ' low/suggestions'"><span title="Critical / High"><i class="danger"></i>{{ counts.danger }}</span><span title="Medium"><i class="warning"></i>{{ counts.warning }}</span><span title="Low / Suggestions"><i class="info"></i>{{ counts.info }}</span></span>
                 } @else { <span [attr.title]="'Total findings; severity breakdown unavailable'">{{ row.findings }}</span> }
               </td>
-              <td>{{ row.duration }}</td>
-              <td>
+              <td data-label="Duration">{{ row.duration }}</td>
+              <td data-label="Mode">
                 <span class="mode-pill" [class.published]="row.mode === 'Published'">{{ row.mode }}</span>
               </td>
-              <td>{{ row.created }}</td>
-              <td>
+              <td data-label="Reviewed">{{ row.created }}</td>
+              <td data-label="Action">
                 @if (row.decision === 'running') {
                   <a class="button table-button" [routerLink]="['/reviews', row.id, 'progress']"
                     >View progress</a

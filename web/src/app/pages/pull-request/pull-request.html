@@ -134,7 +134,7 @@
               <h2>Changed Files ({{ files().length }})</h2>
             </div>
             <div class="table-scroll">
-              <table class="data-table files-table">
+              <table role="table" class="data-table files-table">
                 <thead>
                   <tr>
                     <th>File</th>
@@ -146,7 +146,7 @@
                 <tbody>
                   @for (file of (activeTab() === 'overview' ? files().slice(0, 8) : files()); track file.file_path) {
                     <tr>
-                      <td>
+                      <td data-label="File">
                         <span class="file-name">
                           <span [class]="'file-kind ' + fileType(file)">
                             @switch (fileType(file)) {
@@ -160,14 +160,14 @@
                           <span class="file-path-text" [attr.title]="file.file_path">{{ file.file_path }}</span>
                         </span>
                       </td>
-                      <td><span [class]="statusClass(file.status)">{{ file.status }}</span></td>
-                      <td>
+                      <td data-label="Status"><span [class]="statusClass(file.status)">{{ file.status }}</span></td>
+                      <td data-label="+ / -">
                         <span class="diff-stat">
                           <b>+{{ file.additions ?? '—' }}</b>
                           <em>-{{ file.deletions ?? '—' }}</em>
                         </span>
                       </td>
-                      <td><span class="project-name" [attr.title]="fileProject(file)">{{ fileProject(file) }}</span></td>
+                      <td data-label="Project"><span class="project-name" [attr.title]="fileProject(file)">{{ fileProject(file) }}</span></td>
                     </tr>
                   } @empty {
                     <tr>

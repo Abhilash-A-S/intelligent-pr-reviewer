@@ -34,3 +34,9 @@
   .login-submit { transition: none; }
   .login-submit:not(:disabled):hover { transform: none; }
 }
+
+@media (max-width: 760px) {
+  .login-header .icon-button { width: 44px; height: 44px; flex: 0 0 44px; }
+  .login-header { gap: 12px; }
+  .login-brand { min-width: 0; }
+}

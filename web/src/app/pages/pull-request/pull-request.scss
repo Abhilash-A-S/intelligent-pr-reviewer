@@ -1246,3 +1246,21 @@
     }
   }
 }
+
+@media (max-width: 760px) {
+  .pr-details-page {
+    .pr-heading {
+      top: var(--topbar-height) !important;
+      padding: 10px 0 !important;
+      border: 0 !important; border-radius: 0 !important;
+      background: var(--bg) !important; box-shadow: none !important;
+      backdrop-filter: none !important; gap: 10px !important;
+      .heading-actions { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px !important; }
+      .heading-actions .button { min-height: 44px !important; height: auto !important; font-size: 12px !important; padding: 9px 8px !important; }
+    }
+    .pr-heading-main { gap: 10px !important; }
+    .title-line { gap: 8px !important; }
+    .title-line h1 { font-size: 20px !important; }
+    .pr-meta-line { flex-wrap: nowrap !important; gap: 8px !important; }
+  }
+}

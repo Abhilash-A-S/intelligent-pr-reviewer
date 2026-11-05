@@ -188,7 +188,7 @@
     </div>
 
     <div class="table-scroll">
-      <table class="data-table pr-table">
+      <table role="table" class="data-table pr-table">
         <thead>
           <tr>
             <th>PR</th>
@@ -204,7 +204,7 @@
         <tbody>
           @for (pullRequest of pagedPullRequests(); track pullRequest.number) {
             <tr>
-              <td>
+              <td data-label="PR">
                 <a
                   class="pr-number"
                   [routerLink]="['/pull-requests', pullRequest.number]"
@@ -215,7 +215,7 @@
                   >#{{ pullRequest.number }}</a
                 >
               </td>
-              <td>
+              <td data-label="Title">
                 <a
                   class="pr-title"
                   [routerLink]="['/pull-requests', pullRequest.number]"
@@ -227,18 +227,18 @@
                   {{ pullRequest.title }}
                 </a>
               </td>
-              <td>
+              <td data-label="Author">
                 <span class="author"
                   ><span class="mini-avatar">{{ initials(pullRequest.author) }}</span
                   >{{ pullRequest.author }}</span
                 >
               </td>
-              <td>
+              <td data-label="Branch">
                 <span class="branch"
                   ><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span
                 >
               </td>
-              <td>
+              <td data-label="Files">
                 @if (
                   pullRequest.changed_files !== null && pullRequest.changed_files !== undefined
                 ) {
@@ -251,8 +251,8 @@
                   >
                 }
               </td>
-              <td>{{ relativeTime(pullRequest.updated_at) }}</td>
-              <td>
+              <td data-label="Updated">{{ relativeTime(pullRequest.updated_at) }}</td>
+              <td data-label="Status">
                 <span
                   class="status-pill"
                   [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')"
@@ -260,7 +260,7 @@
                   <span></span>{{ statusLabel(pullRequest) }}
                 </span>
               </td>
-              <td>
+              <td data-label="Action">
                 <a
                   class="button primary table-review-button"
                   [routerLink]="['/pull-requests', pullRequest.number]"
