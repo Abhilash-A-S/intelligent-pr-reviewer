@@ -1,0 +1,175 @@
+<div
+  class="app-frame"
+  [class.no-repositories]="noRepositories()"
+  [class.dashboard-route]="currentPath() === '/'"
+  [class.history-route]="currentPath() === '/history'"
+  [class.pr-detail-route]="currentPath().startsWith('/pull-requests/')"
+  [class.sidebar-collapsed]="sidebarCollapsed()"
+  [class.mobile-nav-open]="mobileNavigationOpen()"
+  [class.page-scrolled]="pageScrolled()"
+>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" routerLink="/" aria-label="Intelligent PR Reviewer dashboard">
+      <span class="brand-mark"><app-icon name="git-branch" /></span>
+      <span class="brand-copy">
+        <strong>Intelligent PR Reviewer</strong>
+        <small>Evidence-grounded code review</small>
+      </span>
+      <strong class="mobile-brand-name" aria-hidden="true">PR Reviewer</strong>
+    </a>
+
+    <div class="topbar-actions">
+      @if (!noRepositories()) {
+      <div class="topbar-health" aria-label="Integration health">
+        @if (auth.providerEnabled('github')) {
+        <span
+          class="health-chip"
+          [class.is-connected]="providerState('github') === 'connected' && providerConnected('github') === true"
+          [class.is-checking]="providerState('github') === 'checking'"
+          [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
+          [class.is-muted]="providerState('github') === 'not-configured'"
+          [class.is-warning]="providerState('github') === 'configured'"
+          [attr.title]="providerDetail('github')"
+        >
+          <app-provider-mark provider="github" /><span class="status-dot"></span>GitHub
+          <span class="health-state">{{ healthState('github') }}</span>
+        </span>
+        }
+        @if (auth.providerEnabled('azure-devops')) {
+        <span
+          class="health-chip"
+          [class.is-connected]="providerState('azure-devops') === 'connected' && providerConnected('azure-devops') === true"
+          [class.is-checking]="providerState('azure-devops') === 'checking'"
+          [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
+          [class.is-muted]="providerState('azure-devops') === 'not-configured'"
+          [class.is-warning]="providerState('azure-devops') === 'configured'"
+          [attr.title]="providerDetail('azure-devops')"
+        >
+          <app-provider-mark provider="azure-devops" /><span class="status-dot"></span>Azure
+          <span class="health-state">{{ healthState('azure-devops') }}</span>
+        </span>
+        }
+        <span class="health-chip" [class.is-connected]="health()?.ollama?.ready === true" [class.is-checking]="!health() || health()?.ollama?.ready === null" [class.is-offline]="health()?.ollama?.ready === false">
+          <app-provider-mark provider="ollama" /><span class="status-dot"></span>Ollama
+          <span class="health-state">{{ healthState('ollama') }}</span>
+        </span>
+      </div>
+
+      <div class="mobile-health-wrapper">
+        <button
+          class="icon-button mobile-health-button"
+          type="button"
+          aria-label="Show integration health"
+          [attr.aria-expanded]="mobileHealthOpen()"
+          [class.has-issue]="healthHasIssue()"
+          (click)="toggleMobileHealth()"
+        >
+          <app-icon name="activity" /><span class="status-dot"></span>
+        </button>
+        @if (mobileHealthOpen()) {
+          <div class="mobile-health-popover" aria-label="Integration health details">
+            <strong>Integration health</strong>
+            @if (auth.providerEnabled('github')) {
+            <span
+              [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('github'))"
+              [attr.title]="providerDetail('github')"
+              ><app-provider-mark provider="github" />GitHub
+              <em>{{ healthState('github') }}</em></span
+            >
+            }
+            @if (auth.providerEnabled('azure-devops')) {
+            <span
+              [class.is-offline]="['authentication-failed', 'unavailable'].includes(providerState('azure-devops'))"
+              [attr.title]="providerDetail('azure-devops')"
+              ><app-provider-mark provider="azure-devops" />Azure DevOps
+              <em>{{ healthState('azure-devops') }}</em></span
+            >
+            }
+            <span [class.is-offline]="health()?.ollama?.ready === false"
+              ><app-provider-mark provider="ollama" />Ollama <em>{{ healthState('ollama') }}</em></span
+            >
+          </div>
+        }
+      </div>
+      }
+      <button
+        class="icon-button theme-toggle"
+        type="button"
+        (click)="theme.toggle()"
+        [attr.aria-label]="theme.mode() === 'dark' ? 'Use light theme' : 'Use dark theme'"
+      >
+        <app-icon [name]="theme.mode() === 'dark' ? 'sun' : 'moon'" />
+      </button>
+      <div class="profile-wrapper">
+        <button class="profile-button" type="button" aria-label="Open user menu" [attr.aria-expanded]="profileOpen()" (click)="profileOpen.set(!profileOpen())">
+          <span class="avatar">{{ auth.user()?.name?.slice(0, 2)?.toUpperCase() || 'IR' }}</span>
+          <span class="profile-copy">
+            <strong>{{ auth.user()?.name }}</strong>
+            <small>{{ health()?.version ? 'v' + health()?.version : 'Connecting…' }}</small>
+          </span>
+          <app-icon name="chevron-down" />
+        </button>
+        @if (profileOpen()) {
+          <div class="profile-popover">
+            <div class="popover-header">
+              <strong>{{ auth.user()?.name }}</strong>
+              <small>Signed in to your workspace</small>
+            </div>
+            <div class="popover-nav"><button class="button secondary" type="button" (click)="auth.logout()">Sign out</button>
+              @if (!noRepositories()) {
+              <a routerLink="/settings" (click)="profileOpen.set(false)"><app-icon name="settings" />Settings</a>
+              <a routerLink="/history" (click)="profileOpen.set(false)"><app-icon name="clock-3" />Review History</a>
+              }
+            </div>
+          </div>
+        }
+      </div>
+      @if (!noRepositories()) {
+      <button
+        class="icon-button mobile-menu-button"
+        type="button"
+        aria-label="Open navigation"
+        [attr.aria-expanded]="mobileNavigationOpen()"
+        aria-controls="primary-navigation"
+        (click)="toggleMobileNavigation()"
+      >
+        <app-icon name="menu" />
+      </button>
+      }
+    </div>
+  </header>
+
+  @if (!noRepositories()) {
+  <aside id="primary-navigation" class="sidebar" aria-label="Primary navigation">
+    <nav>
+      @for (item of navigation; track item.route) {
+        <a
+          class="nav-item"
+          [routerLink]="item.route"
+          [class.active]="isNavigationActive(item.section)"
+          [attr.aria-current]="isNavigationActive(item.section) ? 'page' : null"
+          (click)="closeMobileNavigation()"
+          [attr.title]="sidebarCollapsed() ? item.label : null"
+        >
+          <app-icon [name]="item.icon" />
+          <span>{{ item.label }}</span>
+        </a>
+      }
+    </nav>
+  </aside>
+
+  <button
+    class="nav-backdrop"
+    type="button"
+    aria-label="Close navigation"
+    (click)="closeMobileNavigation()"
+  ></button>
+
+  }
+
+  <main id="main-content" class="main-content" appRevealSections>
+    @if(auth.message()){<div class="inline-alert warning-alert" role="alert">{{auth.message()}}<button class="icon-button" type="button" aria-label="Dismiss message" (click)="auth.message.set('')"><app-icon name="x" /></button></div>}
+    <router-outlet />
+  </main>
+</div>

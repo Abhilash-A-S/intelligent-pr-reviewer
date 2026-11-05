@@ -1,0 +1,342 @@
+[
+  {
+    "severity": "CRITICAL",
+    "location": "src/deep_fastapi_fixture/auth.py:7",
+    "category": "security",
+    "rule": "hardcoded-secret",
+    "issue": "Hardcoded credential or secret detected in 'JWT_SECRET'.",
+    "impact": "Exposed credentials can be copied from source control and used to access protected systems or data.",
+    "evidence": "Changed line 7: JWT_SECRET = \"production-jwt-secret-928374\"",
+    "suggestion": "Move the secret to a secure configuration source such as an environment variable or secret-management service."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/auth.py:10",
+    "category": "security",
+    "rule": "untrusted-identity-header",
+    "issue": "Caller-controlled request headers are returned as authenticated identity or role evidence.",
+    "impact": "A caller can impersonate another identity or privilege level by supplying a trusted-looking header.",
+    "evidence": "Changed line 10: def unsafe_current_user(",
+    "suggestion": "Derive identity from a verified credential and build authorization context server-side."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/auth.py:24",
+    "category": "security",
+    "rule": "authorization",
+    "issue": "The authorization guard checks only that a role exists, not that it grants the required access.",
+    "impact": "This change can weaken the security boundary or expose sensitive behavior.",
+    "evidence": "Changed line 24: if user.get(\"role\"):",
+    "suggestion": "Compare against an explicit allowed role/permission or use a centralized authorization policy."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/auth.py:20",
+    "category": "security",
+    "rule": "jwt-signature-verification-disabled",
+    "issue": "JWT decoding explicitly disables signature verification.",
+    "impact": "Forged tokens can be accepted as authenticated credentials when their signatures are not verified.",
+    "evidence": "Changed line 20: return jwt.decode(token, options={\"verify_signature\": False})",
+    "suggestion": "Verify the signature with an allow-listed algorithm and require expiry and subject claims."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/files.py:29",
+    "category": "resource-lifecycle",
+    "rule": "resource-cleanup",
+    "issue": "The file is created without deterministic closure.",
+    "impact": "Unclosed resources can exhaust file descriptors, sockets, or connection pools under sustained load.",
+    "evidence": "Changed line 29: report = path.open(\"r\", encoding=\"utf-8\")",
+    "suggestion": "Use a with/async with context manager or close the resource in a guaranteed cleanup path."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/files.py:10",
+    "category": "security",
+    "rule": "path-traversal",
+    "issue": "A caller-controlled path segment reaches a file-read boundary without containment validation.",
+    "impact": "A crafted path can escape the configured directory and expose unintended files.",
+    "evidence": "Changed line 10: return (export_root / filename).read_text(encoding=\"utf-8\")",
+    "suggestion": "Resolve the candidate path and verify it remains inside the configured root before reading."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/files.py:16",
+    "category": "security",
+    "rule": "command-injection",
+    "issue": "A command is executed through a shell-enabled API.",
+    "impact": "This change can weaken the security boundary or expose sensitive behavior.",
+    "evidence": "Changed line 16: shell=True,",
+    "suggestion": "Pass a fixed argument list without a shell and validate any external input."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/files.py:21",
+    "category": "security",
+    "rule": "unsafe-deserialization",
+    "issue": "Untrusted binary data is deserialized with an object-construction API.",
+    "impact": "A crafted payload can construct unexpected objects and may execute attacker-controlled behavior.",
+    "evidence": "Changed line 21: return pickle.loads(payload)",
+    "suggestion": "Use a non-executable data format and validate the decoded schema."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/files.py:25",
+    "category": "security",
+    "rule": "unsafe-deserialization",
+    "issue": "YAML is loaded with an unsafe object-construction loader.",
+    "impact": "A crafted payload can construct unexpected objects and may execute attacker-controlled behavior.",
+    "evidence": "Changed line 25: return yaml.load(payload, Loader=yaml.Loader)",
+    "suggestion": "Use yaml.safe_load or SafeLoader and validate the resulting data."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:8",
+    "category": "resource-lifecycle",
+    "rule": "resource-cleanup",
+    "issue": "The HTTP client is created without deterministic closure.",
+    "impact": "Unclosed resources can exhaust file descriptors, sockets, or connection pools under sustained load.",
+    "evidence": "Changed line 8: client = httpx.AsyncClient()",
+    "suggestion": "Use a with/async with context manager or close the resource in a guaranteed cleanup path."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:9",
+    "category": "reliability",
+    "rule": "http-status-not-checked",
+    "issue": "The outbound HTTP response is consumed without validating its status.",
+    "impact": "Error responses may be processed as valid dependency data and corrupt downstream behavior.",
+    "evidence": "Changed line 9: response = await client.get(f\"https://profiles.example.com/users/{user_id}\")",
+    "suggestion": "Call raise_for_status() or explicitly validate the accepted status range."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:10",
+    "category": "type-safety",
+    "rule": "unvalidated-external-data",
+    "issue": "External JSON data is used without runtime shape validation.",
+    "impact": "Unexpected dependency data can propagate into application logic and cause incorrect or unsafe behavior.",
+    "evidence": "Changed line 10: return response.json()",
+    "suggestion": "Validate the decoded value with a schema, model, or explicit type guards before use."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:19",
+    "category": "correctness",
+    "rule": "incorrect-result-handling",
+    "issue": "The function reports success after an exception was silently ignored.",
+    "impact": "Callers can receive a successful result even though the requested operation failed.",
+    "evidence": "Changed line 19: return True",
+    "suggestion": "Propagate the failure or return an explicit unsuccessful result."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:26",
+    "category": "reliability",
+    "rule": "http-status-not-checked",
+    "issue": "The outbound HTTP response is consumed without validating its status.",
+    "impact": "Error responses may be processed as valid dependency data and corrupt downstream behavior.",
+    "evidence": "Changed line 26: response = await client.get(f\"https://profiles.example.com/users/{user_id}\")",
+    "suggestion": "Call raise_for_status() or explicitly validate the accepted status range."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:27",
+    "category": "type-safety",
+    "rule": "unvalidated-external-data",
+    "issue": "External JSON data is used without runtime shape validation.",
+    "impact": "Unexpected dependency data can propagate into application logic and cause incorrect or unsafe behavior.",
+    "evidence": "Changed line 27: profiles.append(response.json())",
+    "suggestion": "Validate the decoded value with a schema, model, or explicit type guards before use."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:26",
+    "category": "performance",
+    "rule": "sequential-await-in-loop",
+    "issue": "Independent outbound requests are awaited serially inside a loop.",
+    "impact": "This can increase unnecessary work or resource usage on an affected execution path.",
+    "evidence": "Changed line 26: response = await client.get(f\"https://profiles.example.com/users/{user_id}\")",
+    "suggestion": "Use bounded concurrency when iterations are independent."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/integrations.py:17",
+    "category": "reliability",
+    "rule": "empty-catch-block",
+    "issue": "An empty exception handler silently ignores a failure.",
+    "impact": "The failure is silently ignored, so callers may continue without knowing the operation failed.",
+    "evidence": "Changed line 17: except Exception:",
+    "suggestion": "Handle, propagate, or explicitly record the exception."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/main.py:23",
+    "category": "security",
+    "rule": "open-redirect",
+    "issue": "A caller-controlled destination is passed directly to a redirect response.",
+    "impact": "Attackers can redirect trusted-site users to a malicious destination.",
+    "evidence": "Changed line 23: return RedirectResponse(next_url)",
+    "suggestion": "Allow only local paths or validate the destination against trusted origins."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/main.py:36",
+    "category": "security",
+    "rule": "exception-detail-exposure",
+    "issue": "Internal exception details are returned directly to the client.",
+    "impact": "Internal exception details can disclose implementation data useful to an attacker.",
+    "evidence": "Changed line 36: return JSONResponse(status_code=500, content={\"error\": str(error)})",
+    "suggestion": "Return a stable public error message and record detailed diagnostics only in protected logs."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/main.py:41",
+    "category": "security",
+    "rule": "unrestricted-file-upload",
+    "issue": "The client filename is used without filename, content-type, or size validation.",
+    "impact": "Unrestricted uploads can consume storage or introduce executable and malicious content.",
+    "evidence": "Changed line 41: destination = f\"uploads/{file.filename}\"",
+    "suggestion": "Generate a server-owned filename, enforce size/type limits, and keep the resolved path inside the upload root."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/main.py:52",
+    "category": "security",
+    "rule": "authorization",
+    "issue": "The authorization guard checks only that a role exists, not that it grants the required access.",
+    "impact": "This change can weaken the security boundary or expose sensitive behavior.",
+    "evidence": "Changed line 52: if not x_role:",
+    "suggestion": "Compare against an explicit allowed role/permission or use a centralized authorization policy."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/main.py:59",
+    "category": "security",
+    "rule": "sensitive-data-logging",
+    "issue": "An authentication or authorization header is written to application output.",
+    "impact": "Credentials written to logs can be exposed to operators, log processors, or compromised monitoring systems.",
+    "evidence": "Changed line 59: print(request.headers.get(\"authorization\"))",
+    "suggestion": "Never log credential headers; record only non-sensitive request metadata."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/repository.py:20",
+    "category": "correctness",
+    "rule": "null-safety",
+    "issue": "A possibly-null value is returned despite the function's non-null return contract.",
+    "impact": "This can produce incorrect behavior for a valid execution path.",
+    "evidence": "Changed line 20: return self.session.get(dict, user_id)  # type: ignore[return-value]",
+    "suggestion": "Handle the missing-value case or declare an optional return type and require callers to handle it."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/repository.py:27",
+    "category": "correctness",
+    "rule": "incorrect-result-handling",
+    "issue": "The operation result is ignored and the function always reports success.",
+    "impact": "Callers can receive a successful result even though the requested operation failed.",
+    "evidence": "Changed line 27: return True",
+    "suggestion": "Return or validate the operation result and preserve its failure outcome."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/repository.py:12",
+    "category": "security",
+    "rule": "sql-injection",
+    "issue": "A SQL execution boundary receives a query containing interpolated runtime data.",
+    "impact": "Attackers may alter the executed query to read or modify data outside the intended operation.",
+    "evidence": "Changed line 12: statement = text(f\"SELECT * FROM users WHERE email = '{email}'\")",
+    "suggestion": "Use parameterized SQL and pass external values separately from the statement text."
+  },
+  {
+    "severity": "HIGH",
+    "location": "src/deep_fastapi_fixture/repository.py:30",
+    "category": "security",
+    "rule": "mass-assignment",
+    "issue": "Caller-provided fields are applied wholesale to an existing domain object.",
+    "impact": "Callers may set privileged or server-owned fields that were not intended to be editable.",
+    "evidence": "Changed line 30: user.update(updates)",
+    "suggestion": "Allow-list editable fields and keep privileged or server-owned fields immutable."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/service.py:11",
+    "category": "reliability",
+    "rule": "async-blocking-operation",
+    "issue": "A blocking sleep is executed inside an async function.",
+    "impact": "Blocking the event-loop thread delays unrelated requests and reduces throughput under concurrency.",
+    "evidence": "Changed line 11: time.sleep(1)",
+    "suggestion": "Use an asynchronous delay such as asyncio.sleep and await it."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/service.py:26",
+    "category": "correctness",
+    "rule": "logic-error",
+    "issue": "The page offset multiplies the one-based page number directly, so the first page skips one page of records.",
+    "impact": "This can produce incorrect behavior for a valid execution path.",
+    "evidence": "Changed line 26: start = page * page_size",
+    "suggestion": "Calculate the offset as (page - 1) * page_size, or explicitly use a zero-based page contract."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/service.py:41",
+    "category": "correctness",
+    "rule": "cache-consistency",
+    "issue": "The cache key omits result-shaping input(s): include_disabled, tenant_id.",
+    "impact": "This can produce incorrect behavior for a valid execution path.",
+    "evidence": "Changed line 41: cache_key = query.lower()",
+    "suggestion": "Include every input that can change the computed result in the cache key."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/service.py:17",
+    "category": "resource-lifecycle",
+    "rule": "unowned-background-task",
+    "issue": "A background task is created without retaining lifecycle or exception ownership.",
+    "impact": "Failures can become unobserved and work may outlive the request or shutdown lifecycle.",
+    "evidence": "Changed line 17: asyncio.create_task(self._send_audit(event))",
+    "suggestion": "Retain and supervise the task, await it in structured concurrency, or register explicit completion/error handling."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "tests/test_unsafe_routes.py:14",
+    "category": "test-quality",
+    "rule": "insufficient-test-assertion",
+    "issue": "The test verifies only the response status and does not validate the response data or behavior.",
+    "impact": "The test can pass while the response or domain behavior is incorrect, reducing regression protection.",
+    "evidence": "Changed line 14: assert response.status_code == 200",
+    "suggestion": "Assert the relevant response body fields or observable domain behavior in addition to the status code."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "tests/test_unsafe_routes.py:23",
+    "category": "test-quality",
+    "rule": "insufficient-test-assertion",
+    "issue": "The test verifies only the response status and does not validate the response data or behavior.",
+    "impact": "The test can pass while the response or domain behavior is incorrect, reducing regression protection.",
+    "evidence": "Changed line 23: assert response.status_code == 307",
+    "suggestion": "Assert the relevant response body fields or observable domain behavior in addition to the status code."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "tests/test_unsafe_routes.py:33",
+    "category": "test-quality",
+    "rule": "insufficient-test-assertion",
+    "issue": "The test verifies only the response status and does not validate the response data or behavior.",
+    "impact": "The test can pass while the response or domain behavior is incorrect, reducing regression protection.",
+    "evidence": "Changed line 33: assert response.status_code == 200",
+    "suggestion": "Assert the relevant response body fields or observable domain behavior in addition to the status code."
+  },
+  {
+    "severity": "MEDIUM",
+    "location": "src/deep_fastapi_fixture/main.py:28",
+    "category": "correctness",
+    "rule": "response-contract-mismatch",
+    "issue": "The response model requires fields not supplied by the returned model: id.",
+    "impact": "The endpoint can fail response validation or return a payload that does not satisfy its published API contract.",
+    "evidence": "Changed line 28: return payload.model_dump()",
+    "suggestion": "Construct the declared response model with every required field."
+  }
+]

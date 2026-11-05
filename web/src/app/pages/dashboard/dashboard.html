@@ -1,0 +1,317 @@
+<section class="page dashboard-page">
+  <header class="page-heading dashboard-heading sticky-page-heading">
+    <div>
+      <h1>Pull Requests</h1>
+      <p>Select a pull request to review and monitor automated analysis</p>
+    </div>
+  </header>
+
+  <section class="card repository-filter" aria-labelledby="repository-filter-title">
+    <h2 id="repository-filter-title" class="sr-only">Repository</h2>
+    <div class="provider-picker-row">
+      <div class="segmented-control" aria-label="Provider">
+        @if (workspace.auth.providerEnabled('github')) {
+        <button
+          type="button"
+          [class.active]="workspace.provider() === 'github'"
+          (click)="setProvider('github')"
+        >
+          <app-provider-mark provider="github" /> GitHub
+        </button>
+        }
+        @if (workspace.auth.providerEnabled('azure-devops')) {
+        <button
+          type="button"
+          [class.active]="workspace.provider() === 'azure-devops'"
+          (click)="setProvider('azure-devops')"
+        >
+          <app-provider-mark provider="azure-devops" /> Azure DevOps
+        </button>
+        }
+      </div>
+
+      <button
+        class="button primary refresh-button"
+        type="button"
+        [disabled]="workspace.loading()"
+        (click)="workspace.refreshPullRequests()"
+      >
+        <app-icon name="refresh-cw" [class.spin]="workspace.loading()" />
+        {{ workspace.loading() ? 'Loading…' : 'Refresh' }}
+      </button>
+    </div>
+
+    <div class="filter-grid" [class.github-grid]="workspace.provider() === 'github'">
+      <div class="field">
+        <span>{{
+          workspace.provider() === 'github' ? 'Owner / organization' : 'Organization'
+        }}</span>
+        <app-smart-select
+          icon="building-2"
+          [options]="organizationOptions()"
+          [value]="workspace.organization()"
+          [placeholder]="
+            workspace.provider() === 'github'
+              ? 'Select a GitHub account'
+              : 'Select an Azure organization'
+          "
+          [ariaLabel]="
+            workspace.provider() === 'github'
+              ? 'GitHub owner or organization'
+              : 'Azure DevOps organization'
+          "
+          [searchPlaceholder]="workspace.provider() === 'github' ? 'Search owners…' : 'Search organizations…'"
+          [searchable]="true"
+          [allowCustomValue]="true"
+          [loading]="workspace.organizationLoading()"
+          [error]="workspace.organizationError()"
+          [emptyLabel]="workspace.provider() === 'github' ? 'No repository owners found' : 'No organizations found'"
+          (valueChange)="workspace.selectOrganization($event)"
+        />
+      </div>
+
+      @if (workspace.provider() === 'azure-devops') {
+        <div class="field">
+          <span>Project</span>
+          <app-smart-select
+            icon="braces"
+            [options]="projectOptions()"
+            [value]="workspace.project()"
+            placeholder="Select an Azure project"
+            ariaLabel="Azure DevOps project"
+            searchPlaceholder="Search projects…"
+            [searchable]="true"
+            [allowCustomValue]="true"
+            [loading]="workspace.projectLoading()"
+            [error]="workspace.projectError()"
+            [disabled]="!workspace.organization()"
+            emptyLabel="No projects found"
+            (valueChange)="workspace.selectProject($event)"
+          />
+        </div>
+      }
+
+      <div class="field">
+        <span>Repository</span>
+        <app-smart-select
+          icon="database"
+          [options]="repositoryOptions()"
+          [value]="workspace.repositoryName()"
+          placeholder="Select a repository"
+          ariaLabel="Repository"
+          searchPlaceholder="Search repositories…"
+          [searchable]="true"
+          [allowCustomValue]="true"
+          [loading]="workspace.repositoryLoading()"
+          [error]="workspace.repositoryError()"
+          [disabled]="
+            !workspace.organization() ||
+            (workspace.provider() === 'azure-devops' && !workspace.project())
+          "
+          emptyLabel="No repositories found"
+          (valueChange)="workspace.selectRepository($event)"
+        />
+      </div>
+
+
+    </div>
+
+    @if (workspace.discoveryError()) {
+      <div class="inline-alert warning-alert discovery-alert" role="status">
+        <app-icon name="circle-alert" />
+        <span
+          ><strong>Automatic discovery is unavailable.</strong>
+          {{ workspace.discoveryError() }}</span
+        >
+        <button class="button subtle" type="button" (click)="workspace.loadOrganizations()">
+          Retry
+        </button>
+      </div>
+    }
+
+    @if (workspace.error()) {
+      <div class="inline-alert error-alert" role="alert">
+        <app-icon name="circle-alert" />
+        <span><strong>Could not refresh this repository.</strong> {{ workspace.error() }}</span>
+      </div>
+    }
+  </section>
+
+  <div class="metric-grid dashboard-metrics">
+    <article class="metric-card neutral" [class.is-zero]="metrics().open === 0">
+      <span class="metric-icon"><app-icon name="git-pull-request" /></span>
+      <span class="metric-copy"
+        ><small>Open PRs</small><strong>{{ metrics().open }}</strong></span
+      >
+    </article>
+    <article class="metric-card warning" [class.is-zero]="metrics().awaiting === 0">
+      <span class="metric-icon"><app-icon name="clock-3" /></span>
+      <span class="metric-copy"
+        ><small>Awaiting review</small><strong>{{ metrics().awaiting }}</strong></span
+      >
+    </article>
+    <article class="metric-card danger" [class.is-zero]="metrics().blocked === 0">
+      <span class="metric-icon"><app-icon name="octagon-alert" /></span>
+      <span class="metric-copy"
+        ><small>Blocked</small><strong>{{ metrics().blocked }}</strong></span
+      >
+    </article>
+    <article class="metric-card success" [class.is-zero]="metrics().passed === 0">
+      <span class="metric-icon"><app-icon name="shield-check" /></span>
+      <span class="metric-copy"
+        ><small>Passed</small><strong>{{ metrics().passed }}</strong></span
+      >
+    </article>
+  </div>
+
+  <section class="card data-card">
+    <div class="table-toolbar">
+      <div class="toolbar-controls">
+        <label class="search-field">
+          <app-icon name="search" />
+          <input
+            type="search"
+            placeholder="Search title, author or branch"
+            [ngModel]="search()"
+            (ngModelChange)="search.set($event)"
+          />
+        </label>
+        <app-smart-select
+          class="toolbar-select"
+          icon="list-filter"
+          [options]="statusOptions"
+          [value]="statusFilter()"
+          ariaLabel="Filter by review status"
+          (valueChange)="setStatusFilter($event)"
+        />
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table role="table" class="data-table pr-table">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>Title</th>
+            <th>Author</th>
+            <th>Branch</th>
+            <th>Files</th>
+            <th>Updated</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (pullRequest of pagedPullRequests(); track pullRequest.number) {
+            <tr>
+              <td data-label="PR">
+                <a
+                  class="pr-number"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                  >#{{ pullRequest.number }}</a
+                >
+              </td>
+              <td data-label="Title">
+                <a
+                  class="pr-title"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                >
+                  {{ pullRequest.title }}
+                </a>
+              </td>
+              <td data-label="Author">
+                <span class="author"
+                  ><span class="mini-avatar">{{ initials(pullRequest.author) }}</span
+                  >{{ pullRequest.author }}</span
+                >
+              </td>
+              <td data-label="Branch">
+                <span class="branch"
+                  ><app-icon name="git-branch" />{{ pullRequest.head_branch }}</span
+                >
+              </td>
+              <td data-label="Files">
+                @if (
+                  pullRequest.changed_files !== null && pullRequest.changed_files !== undefined
+                ) {
+                  <span class="file-count-badge">{{ pullRequest.changed_files }}</span>
+                } @else {
+                  <span
+                    class="file-count-unavailable"
+                    title="The provider did not expose a lightweight file count"
+                    >N/A</span
+                  >
+                }
+              </td>
+              <td data-label="Updated">{{ relativeTime(pullRequest.updated_at) }}</td>
+              <td data-label="Status">
+                <span
+                  class="status-pill"
+                  [class]="'status-pill ' + (pullRequest.review_status ?? 'awaiting')"
+                >
+                  <span></span>{{ statusLabel(pullRequest) }}
+                </span>
+              </td>
+              <td data-label="Action">
+                <a
+                  class="button primary table-review-button"
+                  [routerLink]="['/pull-requests', pullRequest.number]"
+                  [queryParams]="{
+                    provider: workspace.provider(),
+                    repository: workspace.repository(),
+                  }"
+                  aria-label="Review pull request"
+                  >Review</a
+                >
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="8">
+                <div class="empty-state">
+                  <app-icon name="git-pull-request" />
+                  @if (workspace.loading()) {
+                    <strong>Loading pull requests…</strong
+                    ><span>Contacting the selected provider.</span>
+                  } @else if (!workspace.hasRepositorySelection()) {
+                    <strong>Select a repository</strong
+                    ><span>Enter the provider repository details above, then refresh.</span>
+                  } @else if (!workspace.loaded()) {
+                    <strong>Repository ready</strong
+                    ><span>Refresh to load its open pull requests.</span>
+                  } @else if (search() || statusFilter() !== 'all') {
+                    <strong>No matching pull requests</strong
+                    ><span>Adjust the search or status filter.</span>
+                    <button
+                      class="button secondary empty-state-action"
+                      type="button"
+                      (click)="clearFilters()"
+                    >
+                      Clear filters
+                    </button>
+                  } @else {
+                    <strong>No open pull requests</strong
+                    ><span>The selected provider returned an empty list.</span>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="table-footer">
+      <span>Showing {{ firstItem() }}–{{ lastItem() }} of {{ filteredPullRequests().length }} pull requests</span>
+      <app-pagination [total]="filteredPullRequests().length" [page]="currentPage()" [pageSize]="pageSize" (pageChange)="requestedPage.set($event)" />
+    </footer>
+  </section>
+</section>

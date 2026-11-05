@@ -1,0 +1,59 @@
+import { Routes } from '@angular/router';
+
+import { authGuard } from './core/auth.service';
+import { AppShell } from './layout/app-shell';
+
+export const routes: Routes = [
+  {path:'login',title:'Sign in · Intelligent PR Reviewer',loadComponent:()=>import('./pages/login/login').then(m=>m.LoginPage)},
+  {
+    path: '',
+    component: AppShell,
+    canActivate: [authGuard],
+    canActivateChild: [authGuard],
+    children: [
+      {path:'access',title:'Repository access · Intelligent PR Reviewer',loadComponent:()=>import('./pages/no-access/no-access').then(m=>m.NoAccessPage)},
+      {path:'connections',redirectTo:'',pathMatch:'full'},
+      {
+        path: '',
+        title: 'Dashboard · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/dashboard/dashboard').then((module) => module.DashboardPage),
+      },
+      {
+        path: 'pull-requests/:pullNumber',
+        title: 'Pull Request · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/pull-request/pull-request').then((module) => module.PullRequestPage),
+      },
+      {
+        path: 'reviews/:jobId/progress',
+        title: 'Review Progress · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/review-progress/review-progress').then(
+            (module) => module.ReviewProgressPage,
+          ),
+      },
+      {
+        path: 'reviews/:jobId/results',
+        title: 'Review Results · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/review-results/review-results').then(
+            (module) => module.ReviewResultsPage,
+          ),
+      },
+      {
+        path: 'history',
+        title: 'Review History · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/history/history').then((module) => module.HistoryPage),
+      },
+      {
+        path: 'settings',
+        title: 'Settings · Intelligent PR Reviewer',
+        loadComponent: () =>
+          import('./pages/settings/settings').then((module) => module.SettingsPage),
+      },
+    ],
+  },
+  { path: '**', redirectTo: '' },
+];

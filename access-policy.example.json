@@ -1,0 +1,19 @@
+{
+  "grants": [
+    {
+      "subjects": ["https://login.microsoftonline.com/TENANT-ID/v2.0|USER-SUBJECT-FROM-AUTH-ME"],
+      "role": "administrator",
+      "repositories": {
+        "github": ["your-organization/your-repository"],
+        "azure-devops": ["your-organization/your-project/your-repository"]
+      }
+    },
+    {
+      "groups": ["ENTRA-SECURITY-GROUP-OBJECT-ID"],
+      "role": "reviewer",
+      "repositories": {
+        "github": ["your-organization/your-repository"]
+      }
+    }
+  ]
+}
