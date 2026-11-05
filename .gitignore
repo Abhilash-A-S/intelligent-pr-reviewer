@@ -1,7 +1,7 @@
 # Local secrets
 .env
 .env.*
-.env.example
+!.env.example
 
 # Python
 .venv/
