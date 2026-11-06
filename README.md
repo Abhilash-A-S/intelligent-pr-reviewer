@@ -380,7 +380,6 @@ This repository is suitable for evaluating the implemented workflows. A producti
 - Controlled accuracy testing, including safe-code samples and known issues.
 - Publishing retries, duplicate prevention, and partial-failure handling.
 - HTTPS, canonical public/callback URLs, secret management, observability, backups, and restore testing.
-- Explicit licensing and automated CI checks.
 
 Configure production callback URLs using your real HTTPS hostname. Preserve the connection key and back up the identity database securely. Avoid assuming multiple API processes share jobs: the current in-memory manager is process-local.
 
@@ -418,4 +417,4 @@ Built by **Abhilash A S**.
 
 ## License
 
-An explicit project license has not yet been added. Contact the maintainer for licensing questions.
+Intelligent PR Reviewer is licensed under the [MIT License](LICENSE).
