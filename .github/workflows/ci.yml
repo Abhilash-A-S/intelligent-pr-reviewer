@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.13.5'
+          python-version: '3.12'
+
+      - name: Install locked Python dependencies
+        run: uv sync --locked --dev
+
+      - name: Install locked frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      # Backend tests exercise the embedded Angular shell.
+      - name: Build embedded Angular frontend
+        working-directory: web
+        run: npm run build:embedded
+
+      - name: Run frontend tests
+        working-directory: web
+        run: |
+          export CHROME_BIN="$(command -v google-chrome)"
+          npm run test:ci
+
+      - name: Run backend tests with mocked providers
+        run: uv run --locked --no-sync pytest -q
+
+      - name: Build Python distributions
+        run: uv build --clear
